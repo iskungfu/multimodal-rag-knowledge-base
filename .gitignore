@@ -1,0 +1,62 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ===== 虚拟环境 =====
+.venv/
+venv/
+ENV/
+env/
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== 环境变量与敏感信息 =====
+.env
+.env.local
+.env.*.local
+
+# ===== 临时数据与输出 =====
+temp_data/
+**/output_dir/
+**/input_dir/*.pdf
+**/input_dir/*.md
+*.zip
+
+# ===== 模型缓存 =====
+*.bin
+*.pt
+*.pth
+.model/
+models/
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 日志 =====
+*.log
+logs/

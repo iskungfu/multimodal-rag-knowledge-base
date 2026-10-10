@@ -1,0 +1,28 @@
+# ===== Web 框架 =====
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6
+
+# ===== 环境配置 =====
+python-dotenv>=1.0.0
+
+# ===== LangChain / LangGraph =====
+langchain-core>=0.1.0
+langchain-openai>=0.0.5
+langchain-text-splitters>=0.0.1
+langgraph>=0.0.40
+
+# ===== LLM / Embedding =====
+openai>=1.0.0
+
+# ===== 向量数据库 =====
+pymilvus>=2.3.0
+
+# ===== 对象存储 =====
+minio>=7.2.0
+
+# ===== HTTP 请求 =====
+requests>=2.31.0
+
+# ===== 数据验证 =====
+pydantic>=2.0.0
