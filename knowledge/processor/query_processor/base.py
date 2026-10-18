@@ -9,6 +9,9 @@ from knowledge.processor.query_processor.config import QueryConfig, get_config
 from knowledge.processor.query_processor.exceptions import QueryProcessError
 from knowledge.utils.task_util import add_running_task, add_done_task, get_task_status, get_running_task_list, \
     get_done_task_list
+from knowledge.utils.task_util import add_running_task, add_done_task, get_task_status, get_running_task_list, \
+    get_done_task_list
+from knowledge.utils.sse_util import push_sse_event, SSEEvent
 
 T = TypeVar("T")  # 泛型状态类型
 
@@ -118,14 +121,33 @@ class BaseNode(ABC):
             log_msg += f" {message}"
         self.logger.info(log_msg)
 
-    def setup_logging(level: int = logging.INFO):
-        """配置查询流程日志。
+    @staticmethod
+    def _push_progress(task_id: str):
+        """推送当前任务的进度快照到 SSE 队列（前端覆盖式渲染）。
 
         Args:
-            level: 日志级别，默认 INFO。
+            task_id: 任务 ID，用于定位 SSE 队列。
         """
-        logging.basicConfig(
-            level=level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+        # 每次推送全量快照（而不是增量），即使中间丢一条，下一条也能正确显示
+        push_sse_event(
+            task_id=task_id,
+            event=SSEEvent.PROGRESS,
+            data={
+                "status": get_task_status(task_id),
+                "done_list": get_done_task_list(task_id),
+                "running_list": get_running_task_list(task_id),
+            }
         )
+
+
+def setup_logging(level: int = logging.INFO):
+    """配置查询流程日志。
+
+    Args:
+        level: 日志级别，默认 INFO。
+    """
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )

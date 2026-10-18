@@ -102,6 +102,13 @@ class QueryConfig:
     mcp_dashscope_base_url: str = field(
         default_factory=lambda: os.getenv("MCP_DASHSCOPE_BASE_URL", "")
     )
+    # MCP 鉴权使用阿里云百炼(DashScope)的 API Key，仅MCP调用使用，与 OPEN_API_KEY(中转站) 无关
+    mcp_dashscope_api_key: str = field(
+        default_factory=lambda: os.getenv(
+            "MCP_DASHSCOPE_API_KEY",
+            os.getenv("DASHSCOPE_API_KEY", "")
+        )
+    )
 
     @classmethod
     def from_env(cls) -> "QueryConfig":

@@ -25,6 +25,9 @@ class AIClients(BaseClientManager):
     _bge_m3_client: Optional[BGEM3EmbeddingFunction] = None
     _bge_m3_lock = threading.Lock()
 
+    _bge_reranker_client = None
+    _bge_reranker_lock = threading.Lock()
+
     # ── VLM ──
 
     @classmethod
@@ -116,6 +119,41 @@ class AIClients(BaseClientManager):
 
         except Exception as e:
             raise ConnectionError(f"BGE_M3嵌入模型客户端创建失败: {e}") from e
+
+    # ── BGE-Reranker 重排序模型客户端 ──
+    @classmethod
+    def get_bge_m3_rerank_client(cls):
+        return cls._get_or_create("_bge_reranker_client", cls._bge_reranker_lock,
+                                  cls._create_bge_m3_rerank_client)
+
+    @classmethod
+    def _create_bge_m3_rerank_client(cls):
+        """
+        创建bge-reranker-large 重排序模型客户端
+        Returns:
+        """
+        try:
+            # 1. 获取环境变量
+            model_name = cls._require_env('BGE_RERANKER_LARGE')
+            device = cls._require_env('BGE_RERANKER_DEVICE')
+            fp16_str = cls._require_env('BGE_RERANKER_FP16')
+
+            use_fp16 = fp16_str.lower() in ("true", "1")
+
+            # 2. 延迟导入FlagEmbedding: 未安装时不影响其他AI客户端的正常使用
+            from FlagEmbedding import FlagReranker
+
+            # 3. 创建
+            reranker = FlagReranker(
+                model_name_or_path=model_name,
+                use_fp16=use_fp16,
+                device=device
+            )
+            return reranker
+        except EnvironmentError:
+            raise
+        except Exception as e:
+            raise ConnectionError(f"BGE-Reranker重排序模型客户端创建失败: {e}") from e
 
 
 if __name__ == '__main__':

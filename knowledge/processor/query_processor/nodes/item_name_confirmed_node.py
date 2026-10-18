@@ -3,7 +3,9 @@ import re
 from logging import Logger
 from typing import Dict, Any, List, Tuple
 
+from Demos.win32ts_logoff_disconnected import session
 from langchain_core.messages import SystemMessage, HumanMessage
+from openai.types.beta.chatkit.chat_session_chatkit_configuration_param import History
 
 from knowledge.processor.query_processor.base import BaseNode
 from knowledge.processor.query_processor.config import QueryConfig
@@ -13,6 +15,7 @@ from knowledge.utils.clients.ai_clients import AIClients
 from knowledge.utils.clients.storage_clients import StorageClients
 from knowledge.utils.embedding_util import generate_bge_m3_hybrid_vectors
 from knowledge.utils.milvus_util import create_hybrid_search_requests, execute_hybrid_search_query
+from knowledge.utils.mongo_history_util import get_recent_messages
 
 
 class _ItemNameAligner:
@@ -32,8 +35,8 @@ class _ItemNameAligner:
             return [], []
         # 2. 根据混合向量检索到结果做对齐【confirmed/options】
         confirmed, options = self._align(search_result)
-        print("confirmed:", confirmed)
-        print("options:", options)
+        # print("confirmed:", confirmed)
+        # print("options:", options)
         # 3. 分数差异化过滤
         # 3.1 如果confirmed的长度大于1，则进行分数差异化过滤
         if len(confirmed) > 1:
@@ -321,7 +324,21 @@ class ItemNameConfirmedNode(BaseNode):
         # 1. 获取用户原始问题
         original_query = state["original_query"]
         # TODO 2. 获取历史对话(mongodb)
+        # 获取session_id
+        session_id = state.get("session_id", "")
+        # 获取历史会话结果
+        history_messages = get_recent_messages(
+            session_id=session_id
+        )
+
+        state["history"] = history_messages
+
         formatted_history_str = ""
+        for msg in history_messages:
+            role = msg.get("role")
+            content = msg.get("text", "")
+            formatted_history_str += f"{role}: {content}\n"
+
         # 3. 获取LLM结果
         llm_result: Dict[str, Any,] = self._extractor.extract_item_name(original_query, formatted_history_str)
 
@@ -330,8 +347,8 @@ class ItemNameConfirmedNode(BaseNode):
         confirmed, options = self._item_name_aligner.search_and_align(extracted_item_names)
 
         # 5. 决策
-        # rewritten_query = llm_result.get("rewritten_query")
-        # self._dicide(confirmed, options, state, rewritten_query)
+        rewritten_query = llm_result.get("rewritten_query")
+        self._dicide(confirmed, options, state, rewritten_query)
         return state
 
     def _dicide(self, confirmed: List[str], options: List[str], state: QueryGraphState, rewritten_query: str):
@@ -350,7 +367,7 @@ class ItemNameConfirmedNode(BaseNode):
 if __name__ == '__main__':
     node = ItemNameConfirmedNode()
     state = {
-        "original_query": "特斯拉与HUAWEI MateBook B5-440的区别"
+        "original_query": "华为笔记本的价格是多少"
     }
     result_state = node.process(state)
     print(result_state)

@@ -15,8 +15,17 @@ langgraph>=0.0.40
 # ===== LLM / Embedding =====
 openai>=1.0.0
 
+# ===== 重排序模型 =====
+FlagEmbedding>=1.2.0
+
+# ===== MCP 客户端 =====
+openai-agents>=0.0.7
+
 # ===== 向量数据库 =====
 pymilvus>=2.3.0
+
+# ===== 文档数据库 =====
+pymongo>=4.0.0
 
 # ===== 对象存储 =====
 minio>=7.2.0

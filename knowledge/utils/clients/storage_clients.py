@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 from minio import Minio
+from pymongo import MongoClient
 from pymilvus import MilvusClient
 from dotenv import load_dotenv
 from knowledge.utils.clients.base import BaseClientManager
@@ -14,13 +15,16 @@ load_dotenv()
 
 
 class StorageClients(BaseClientManager):
-    """存储类客户端：MinIO、Milvus"""
+    """存储类客户端：MinIO、Milvus、MongoDB"""
 
     _minio_client: Optional[Minio] = None
     _minio_lock = threading.Lock()
 
     _milvus_client: Optional[MilvusClient] = None
     _milvus_lock = threading.Lock()
+
+    _mongo_client: Optional[MongoClient] = None
+    _mongo_lock = threading.Lock()
 
     # ── MinIO ──
 
@@ -73,3 +77,25 @@ class StorageClients(BaseClientManager):
         except Exception as e:
             logger.error(f"Milvus 客户端创建失败: {e}")
             raise ConnectionError(f"Milvus 连接失败: {e}") from e
+
+    # ── MongoDB ──
+
+    @classmethod
+    def get_mongo_client(cls) -> MongoClient:
+        return cls._get_or_create("_mongo_client", cls._mongo_lock, cls._create_mongo_client)
+
+    @classmethod
+    def _create_mongo_client(cls) -> MongoClient:
+        try:
+            uri = cls._require_env("MONGO_URL")
+
+            # serverSelectionTimeoutMS: 服务不可用时快速失败，避免长时间阻塞
+            client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            logger.info("MongoDB 客户端初始化成功")
+            return client
+
+        except EnvironmentError:
+            raise
+        except Exception as e:
+            logger.error(f"MongoDB 客户端创建失败: {e}")
+            raise ConnectionError(f"MongoDB 连接失败: {e}") from e
