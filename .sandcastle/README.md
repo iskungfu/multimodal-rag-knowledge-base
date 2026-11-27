@@ -2,6 +2,7 @@
 
 使用 Ubuntu-24.04 / WSL2、bwrap 和 Codex。Windows 项目仍位于 `D:\Project\shopkeeper-brain`。
 Linux 的 npm 依赖存放在 `~/.local/share/shopkeeper-brain/sandcastle/`，不复用项目根目录的 Windows node_modules。
+业务任务的 Python 虚拟环境创建在沙箱 `/tmp/shopkeeper-venv`，避免 WSL Windows 挂载盘上的权限问题；沙箱结束后自动清理。
 
 ## 检查环境
 
