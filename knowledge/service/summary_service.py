@@ -13,6 +13,21 @@ from knowledge.summary.strategies import StrategyChecklistModel
 OWNER = "default_user"
 
 
+def market_evidence(assessments, stocks):
+    evidence = []
+    for item in assessments:
+        level = item["level"] + "风险" if item["level"] else "无法评级"
+        limitation = "（有限依据）" if item["limited"] else ""
+        change = f'{item["return_pct"]:.2f}%' if item["return_pct"] is not None else "缺失"
+        ratio = f'{item["volume_ratio"]:.2f}倍' if item["volume_ratio"] is not None else "缺失"
+        text = (f'{item["name"]}（{item["symbol"]}）{item["date"]}：{level}{limitation}；'
+                f'近{N}日涨跌幅{change}，成交量比{ratio}，来源{item["latest"]["source"]}。')
+        evidence.append({"id": "index:" + item["symbol"], "text": text + "；".join(item["warnings"])})
+    for item in stocks:
+        evidence.append({"id": "stock:" + item["code"], "text": item["assessment"]})
+    return evidence
+
+
 class SummaryBusy(Exception):
     pass
 
@@ -71,7 +86,7 @@ class SummaryService:
             try:
                 self.repository.finish(claim, self.now(), error=message)
             except Exception:
-                pass  # 存储恢复后，读取/重试时回收过期租约。
+                pass
 
         try:
             def check_budget():
@@ -85,7 +100,6 @@ class SummaryService:
                 assessment = evaluate_index(rows, symbol, day)
                 assessments.append(assessment)
                 warnings.extend(notices + assessment["warnings"])
-            # 固定用户关注快照；复用 #5 RiskService 与 evaluate，历史补生成锚定该收盘日。
             check_budget()
             watch = self.watchlist.read(self.owner)
             risk = RiskService(lambda: self.market, now=lambda: datetime.combine(day, time(16), SHANGHAI))
@@ -97,12 +111,14 @@ class SummaryService:
                 warnings.append("尚未配置关注股票；关注列表不代表实际持仓")
             check_budget()
             error = "个人策略检索失败，未编造策略；请检查策略库后重试"
-            retrieved = self.strategies.retrieve(self.owner, "收盘复核：风险控制、仓位约束、避免追高、条件与交易纪律。" +
-                                                 " ".join(item["name"] for item in watch))
+            evidence = market_evidence(assessments, stocks)
+            retrieval_query = "收盘复核：结合以下风险与缺失信息，检索相关的个人风险控制、仓位约束及交易纪律。\n"
+            retrieval_query += "\n".join(item["text"].split("\n\n")[0] for item in evidence)
+            retrieved = self.strategies.retrieve(self.owner, retrieval_query)
             strategies = []
             if retrieved["status"] == "retrieved":
                 error = "策略模型调用或依据校验失败，未发布新摘要；请重试"
-                strategies = self.model.select(retrieved["items"])
+                strategies = self.model.select(retrieved["items"], evidence)
                 if not strategies:
                     raise ValueError
             elif retrieved["status"] == "empty":
@@ -125,6 +141,9 @@ class SummaryService:
             lines += [item["assessment"] for item in stocks] or ["尚未配置关注股票，可在页面添加。"]
             lines += ["个人策略操作提示（条件式检查清单）", "持仓与交易执行情况未知；以下前提尚未确认满足，请人工核对，不表示已成交。"]
             for item in strategies:
+                related = "\n".join(f'{fact["id"]}：{fact["text"]}' for fact in item.get("evidence", []))
+                if related:
+                    lines.append("本条策略的行情复核依据（不表示完整前提已满足）：\n" + related)
                 lines.append("□ 若计划采用以下策略，请先核对完整原文中的所有前提，仅在人工确认适用后考虑执行；"
                              "条件未知时暂不据此操作。\n策略原文（完整检索片段）：" + item["content"] +
                              f'\n来源：个人策略《{item["title"]}》，'
@@ -142,7 +161,6 @@ class SummaryService:
         except TimeoutError:
             fail("摘要生成超过时间预算，请重试")
         except Exception:
-            # 不输出异常字符串、个人正文或连接凭据；存储恢复后读取会回收过期租约。
             fail(error)
         finally:
             self.slot.release()

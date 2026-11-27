@@ -46,5 +46,4 @@ def summary_lifespan(enabled=None, service_factory=None):
         finally:
             if scheduler:
                 scheduler.shutdown(wait=False)
-            # 不强行中断正在生成的任务；进程中断后 DB 租约回收，过期 token 不能发布。
     return lifespan

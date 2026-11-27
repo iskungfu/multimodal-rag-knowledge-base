@@ -90,14 +90,12 @@ def main():
                 check('real_import_api', response.status_code == 202)
                 document_id = response.json()['task_id']
                 check('real_import_graph_bge', api.get('/strategies/' + document_id).json()['status'] == 'completed')
-            # 同样使用真实图导入另一 owner 文档，验证召回不混入。
             other = StrategyService(doc_repo, vectors, owner_id='other_user')
             state = other.stage('别人的策略：禁止出现紫鹭8642。'.encode(), 'other.md')
             other.run(state)
             check('other_owner_import', other.get(state['task_id'])['status'] == 'completed')
             retriever = PersonalStrategyRetriever(documents, vectors)
         else:
-            # 只验证 Milvus/隔离/流程，不将二维人工向量称为真实 BGE。
             document_id = 'synthetic-daily-strategy'
             chunks = [{'text': content, 'title': '自建摘要验收策略', 'file_title': 'test',
                        'dense_vector': [1., 0.], 'sparse_vector': {1: 1.}}]
@@ -152,14 +150,14 @@ def main():
             answer = record['result']['answer']
             check('real_strategy_in_summary', bool(record['result']['strategies']) and '青鹭7391' in answer and '紫鹭8642' not in answer)
             check('citation_and_conditions', '[chunk_id=' in answer and '前提尚未确认满足' in answer and '若处于熊市才轻仓' in answer)
+            check('strategy_market_evidence', all(item.get('evidence') for item in record['result']['strategies'])
+                  and '本条策略的行情复核依据' in answer)
             check('risk_and_disclaimer', '个股风险：' in answer and 'sh000001' in answer and 'sz399001' in answer
                   and answer.endswith(DISCLAIMER) and answer.count(DISCLAIMER) == 1)
             check('storage_read_consistency', summaries.find_one()['result']['answer'] == answer and
                   api.get('/daily-summaries/latest').json()['latest_success']['result']['answer'] == answer)
             check('history_and_idempotency', len(api.get('/daily-summaries').json()['items']) == 1 and
                   not api.post('/daily-summaries/generate', json={'date': str(day)}).json()['started'])
-        # 实际 APScheduler executor 触发同一入口，测试关闭自动 cron；不等待收盘时间。
-        # 仅改本次 UUID 测试记录，模拟失败重试，验证调度真正生成而非只命中缓存。
         summaries.update_one({'owner_id': service.owner, 'date': str(day)}, {'$set': {'status': 'failed', 'error': '验收重试'}})
         old_now = service.now
         service.now = lambda: datetime.combine(day, time(23), SHANGHAI)

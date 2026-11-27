@@ -18,7 +18,6 @@ class SummaryInputError(ValueError):
 def protect_result(result):
     if not result:
         return result
-    # ID 仅来自实际召回；正文仍完整脱敏，避免保护标识损坏引用。
     citations = [str(item["chunk_id"]) for item in result.get("strategies", [])]
     answer = finalize_answer(result.get("answer", ""), citations)
     result = redact_value({key: value for key, value in result.items() if key != "answer"})
@@ -56,7 +55,6 @@ class SummaryRepository:
         fields = {"status": "failed" if error else "completed", "updated_at": now, "error": error}
         if result is not None:
             fields.update(result=protect_result(result), generated_at=now)
-        # 失败仅更新尝试状态；同一天的上次成功结果仍可拉取。
         return self.collection.update_one({"_id": claim["_id"], "owner_id": claim["owner_id"],
             "token": claim["token"], "status": "processing", "lease_until": {"$gt": now}}, {
                 "$set": fields, "$unset": {"token": "", "lease_until": ""},
@@ -79,7 +77,7 @@ class SummaryRepository:
         if row is None:
             return None
         result = protect_result(row.get("result"))
-        row = redact_value({k: v for k, v in row.items() if k not in {"_id", "token", "result"}})
+        row = redact_value({key: value for key, value in row.items() if key not in {"_id", "token", "result"}})
         if result is not None:
             row["result"] = result
         return row

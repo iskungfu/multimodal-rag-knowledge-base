@@ -79,7 +79,6 @@ def test_real_mongo_cross_worker_unique_lease_and_watchlist(storage):
 def test_real_llm_api_market_storage_and_scheduler(storage):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    # 自建、无敏感资料的固定上下文。实际向量检索另由主机验收入口完成。
     items = [{'source': 'personal', 'owner_id': 'default_user', 'document_id': 'synthetic-issue6',
               'chunk_id': 'summary-test-1', 'title': '自建验收策略',
               'content': '如果单只股票风险较高，先检查是否超过自己设定的仓位上限。若处于熊市才轻仓；市场阶段未知时不能据此操作。'}]
@@ -94,7 +93,6 @@ def test_real_llm_api_market_storage_and_scheduler(storage):
     service.add_watch('000001')
     now = service.now()
     _, end = date_window(None, None, now)
-    # 选择源实际最近收盘日；休市运行探针同样可验证手动补生成。
     rows, _ = indices.fetch('sh000001', end-timedelta(days=120),
                            EastmoneyIndexAdapter().fetch_daily('sh000001', end-timedelta(days=120), end, now)[-1].date, now)
     from datetime import date, time

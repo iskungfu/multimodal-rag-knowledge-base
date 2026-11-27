@@ -268,6 +268,7 @@ export const addWatch = (query) => request('/watchlist', {
 });
 export const deleteWatch = (code) => request(`/watchlist/${encodeURIComponent(code)}`, {method: 'DELETE'});
 export const fetchLatestSummary = () => request('/daily-summaries/latest');
+export const fetchSummary = (date) => request(`/daily-summaries/${encodeURIComponent(date)}`);
 export const fetchSummaryHistory = () => request('/daily-summaries?limit=30');
 export const generateSummary = (date, retry = false) => request('/daily-summaries/generate', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({date, retry}),

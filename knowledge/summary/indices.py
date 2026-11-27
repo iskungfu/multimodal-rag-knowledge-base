@@ -21,10 +21,10 @@ class IndexQuote(BaseModel):
     symbol: str
     name: str
     date: date
-    close: float = Field(gt=0)  # 点
+    close: float = Field(gt=0)
     change_pct: float
-    volume: float = Field(ge=0)  # 股，来源手数 * 100
-    amount: float = Field(ge=0)  # 元
+    volume: float = Field(ge=0)
+    amount: float = Field(ge=0)
     source: str
     updated_at: datetime
     source_time: datetime | None = None
@@ -46,12 +46,17 @@ class EastmoneyIndexAdapter:
                 "end": end.strftime("%Y%m%d"), "fields1": "f1,f2,f3,f4,f5,f6",
                 "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
             }).decode("utf-8"))
+            if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
+                raise ValueError
             data = payload["data"]
             if (payload.get("rc") != 0 or data["code"] != symbol[2:]
-                    or str(data["market"]) != secid[0] or data["name"] != name):
+                    or str(data["market"]) != secid[0] or data["name"] != name
+                    or not isinstance(data.get("klines"), list)):
                 raise ValueError
             rows = []
             for line in data["klines"]:
+                if not isinstance(line, str):
+                    raise ValueError
                 fields = line.split(",")
                 day = date.fromisoformat(fields[0])
                 if start <= day <= end:
@@ -62,7 +67,7 @@ class EastmoneyIndexAdapter:
                         raw={"kline": line, "secid": secid, "name": name},
                     ))
             return rows
-        except PARSE_ERRORS:
+        except (AttributeError, *PARSE_ERRORS):
             raise MarketUnavailable("指数日线身份或数据无效") from None
 
 
@@ -91,7 +96,7 @@ class TencentIndexAdapter:
                 amount=number(fields[57], 10000), source=self.name, source_time=stamp,
                 updated_at=now, raw={"snapshot": raw},
             )]
-        except PARSE_ERRORS:
+        except (AttributeError, *PARSE_ERRORS):
             raise MarketUnavailable("指数快照身份或数据无效") from None
 
 
@@ -123,21 +128,19 @@ class IndexService:
         self.adapters = adapters if adapters is not None else [EastmoneyIndexAdapter(), TencentIndexAdapter()]
 
     def fetch(self, symbol, start, end, now):
-        # 已核实并存储的历史收盘可离线补生成；最新日每次仍尝试刷新。
         for adapter in self.adapters:
             try:
                 quotes = adapter.fetch_daily(symbol, start, end, now)
                 if not quotes:
                     continue
-                # 来源同一批出现冲突不能由 upsert 最后一条静默覆盖。
                 by_day = {}
                 for quote in quotes:
                     if quote.date in by_day and quote != by_day[quote.date]:
                         raise MarketUnavailable("指数同日行情冲突")
                     by_day[quote.date] = quote
                 self.repository.save(quotes)
-                rows = self.repository.read(symbol, start, end)
-                if any(row["date"] == end.isoformat() for row in rows):
+                if end in by_day:
+                    rows = self.repository.read(symbol, start, end)
                     return rows, (["指数备用源仅提供单日快照；历史依据以已存日线为准"]
                                   if adapter.name != "eastmoney" else [])
             except MarketUnavailable:
@@ -155,8 +158,8 @@ def evaluate_index(rows, symbol, day):
         parsed = IndexQuote.model_validate({**row, "raw": row.get("raw", {})})
         if parsed.symbol != symbol or parsed.name != INDICES[symbol][1] or parsed.date > day:
             raise MarketUnavailable("指数身份或日期异常")
-        if parsed.date in unique and any(unique[parsed.date][k] != row[k]
-                                               for k in ("close", "change_pct", "volume")):
+        if parsed.date in unique and any(unique[parsed.date][field] != row[field]
+                                        for field in ("close", "change_pct", "volume")):
             raise MarketUnavailable("指数同日行情冲突")
         unique[parsed.date] = row
     ordered = [unique[key] for key in sorted(unique)]

@@ -227,9 +227,14 @@ def test_personal_retriever_owner_type_completed_and_failure(env):
 
 def test_model_cannot_invent_citations_or_rewrite_and_full_conditions_retained():
     items = [{'chunk_id': '1', 'content': '如果大幅回撤才减仓。'}]
-    assert validate_selections({'checks': [{'chunk_id': '1', 'quote': '减仓'}]}, items) == items
+    evidence = [{'id': 'index:sh000001', 'text': '上证指数高风险'}]
+    selected = validate_selections({'checks': [{'chunk_id': '1', 'quote': '减仓', 'evidence_ids': ['index:sh000001']}]}, items, evidence)
+    assert selected == [{**items[0], 'evidence': evidence}]
     for selection in [{'chunk_id': 'fake', 'quote': '减仓'}, {'chunk_id': '1', 'quote': '立即全仓买入'}]:
-        with pytest.raises(ValueError): validate_selections({'checks': [selection]}, items)
+        with pytest.raises(ValueError):
+            validate_selections({'checks': [{**selection, 'evidence_ids': ['index:sh000001']}]}, items, evidence)
+    with pytest.raises(ValueError):
+        validate_selections({'checks': [{'chunk_id': '1', 'quote': '减仓', 'evidence_ids': ['unknown']}]}, items, evidence)
 
 
 @pytest.mark.parametrize('count', [1, 20, 21, 25])
@@ -403,3 +408,37 @@ def test_unexpected_value_error_is_not_echoed(env):
     env.service.resolver.resolve.side_effect = ValueError('private-connection-token')
     response = env.client.post('/watchlist', json={'query': '000001'})
     assert response.status_code == 503 and 'private' not in response.text
+
+
+def test_actual_market_changes_retrieval_model_context_and_checklist(env):
+    strategy = {'source': 'personal', 'owner_id': 'default_user', 'document_id': 'strategy-test',
+                'chunk_id': 'strategy-1', 'title': '控制风险', 'content': '若风险偏高，先核对仓位上限。'}
+    env.strategies.retrieve.return_value = {'status': 'retrieved', 'items': [strategy]}
+    env.model.select.side_effect = lambda items, evidence: validate_selections({
+        'checks': [{'chunk_id': 'strategy-1', 'quote': strategy['content'],
+                    'evidence_ids': ['index:sh000001']}],
+    }, items, evidence)
+    low = env.service.generate(DAY)
+    low_query = env.strategies.retrieve.call_args.args[1]
+    low_context = env.model.select.call_args.args[1]
+    def high_rows(symbol, *args):
+        rows = index_rows(symbol)
+        rows[-1]['change_pct'] = 12
+        return rows, []
+    env.indices.fetch.side_effect = high_rows
+    high = env.service.generate(DAY, retry=True)
+    high_context = env.model.select.call_args.args[1]
+    assert low['status'] == high['status'] == 'completed'
+    assert low_query != env.strategies.retrieve.call_args.args[1]
+    assert '低风险' in low_context[0]['text'] and '高风险' in high_context[0]['text']
+    assert high['result']['strategies'][0]['evidence'] == [high_context[0]]
+    assert '本条策略的行情复核依据' in high['result']['answer']
+    assert '不表示完整前提已满足' in high['result']['answer']
+
+
+def test_stock_evidence_preserves_insufficient_data_and_source_dates(env):
+    from knowledge.service.summary_service import market_evidence
+    assessments = [evaluate_index(index_rows('sh000001'), 'sh000001', DAY)]
+    stock = {'code': '000001', 'assessment': '实际行情日期：2026-11-26；个股风险：无法完整评估；更新失败后的旧缓存。'}
+    facts = market_evidence(assessments, [stock])
+    assert facts[-1] == {'id': 'stock:000001', 'text': stock['assessment']}

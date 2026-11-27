@@ -1,6 +1,6 @@
 # Issue #6：每日投资摘要生成
 
-状态：完成（completed；沙箱实施与可运行验收完成；真实 BGE 全流程、完整 RAG 和浏览器待主机验收，不代表最终主机验收通过）
+状态：完成（completed；沙箱实施、独立双轴审查、主机真实 BGE 摘要、三条完整 RAG 与浏览器验收均完成）
 
 日期：2026-11-27（Asia/Shanghai）
 
@@ -74,9 +74,9 @@ DAILY_SUMMARY_ENABLED=0 AFK_RUN_MARKET_INTEGRATION=1 AFK_RUN_RISK_INTEGRATION=1 
 
 收尾只读核对：**AFK_TEST_DB_NAME为0 collection/0 document；默认应用 `_app` 库为0 collection/0 document；summary_accept_* Milvus残留0**。未清空数据库或改写业务数据。本轮测试自动cron均关闭，受控测试仅验证lifespan和单次scheduler executor。
 
-## 待主机验收及限制
+## 沙箱结束时的待验收项
 
-**真实BGE策略导入→召回→摘要、三条完整公共RAG、浏览器/390px：待主机验收。** 沙箱没有本机BGE、MinerU凭据和浏览器，未运行这些流程，不能算通过。
+沙箱结束时，真实 BGE 策略导入→召回→摘要、三条完整公共 RAG、浏览器/390px 尚待主机验收；已在下方主机阶段补验。沙箱自身没有运行这些流程，其测试结果不能代替主机结果。
 
 ```bash
 python scripts/verify_daily_summary.py --host
@@ -86,8 +86,48 @@ python scripts/verify_rag.py --legacy
 python scripts/verify_rag.py --knowledge --stream
 ```
 
-主机脚本不下载模型，使用自建策略和独立资源；浏览器步骤、配置与退出清理见docs/daily-summary.md。完整RAG脚本本轮修改后的实际主机执行仍待验证。
+主机脚本不下载模型，使用自建策略和独立资源；浏览器步骤、配置与退出清理见 docs/daily-summary.md。
 
 没有验证长期无人值守调度、供应商真实限流上限、全部证券/更名与历史修订，也没有回测阈值。服务离线无法自动生成，支持手动补生成。无法安全强杀本机BGE底层线程：若底层永久卡住，Mongo状态会过期为failed、禁止旧结果发布，但该进程需要重启释放生成槽；正常网络调用/流程有超时和阶段预算。
 
-仅本地提交，commit格式 `RALPH: 实现每日投资摘要与可恢复收盘调度 (#6)`。未push、创建PR、写GitHub评论、修改Issue状态/依赖或关闭Issue。#2/#6仍OPEN，由用户审阅及主机验收后决定发布。
+沙箱仅本地提交 `1d2b649`，没有 push、创建 PR、写 GitHub 评论或修改 Issue 状态/依赖。主协作者按持续授权完成以下验收、修复和 push；#2/#6 仍 OPEN，没有合并 main 或部署。
+
+## 主机最终验收
+
+沿 `codex/sandcastle-2026-11-27T14-24-36-901Z` 执行。Windows 主机使用现有模型环境的 `host-check-venv`，仅增加 APScheduler 3.11.3/tzlocal，不升级 BGE/torch，不下载模型。审查固定基点 `f995d06750c4f314096197d1393fe072d8a62041`。
+
+- 最终 **329 passed in 64.31s，无 skip**：316 单元/API/回归 + 13 真实行情、MongoDB、LLM 集成。报告 `.sandcastle/logs/summary_regression_c5bc54c43874.json`，整个探针65.53秒。显式库与默认应用库均独立，收尾无集合残留。
+- 收尾整理时误删了仍被指数计算使用的 `finite` 导入，定向回归捕获18项失败；恢复该导入后 **76 passed in 3.52s**。未提交失败状态；Python语法、JS语法、差异检查和敏感配置扫描通过。
+- 真实 BGE-M3 策略导入→Milvus隔离召回→实际行情→应用LLM→MongoDB→API **16/16**；含风险依据与策略关联、原文条件、实际 chunk_id、免责声明、跨 owner 排除和实际 APScheduler executor 失败重试生成。报告 `.sandcastle/logs/summary_accept_bc7bb6ced9a34424.json`，MongoDB/Milvus清理通过。
+- 完整 PDF RAG + SSE **22/22**，93.55秒，`.sandcastle/logs/rag_accept_990131a53864.json`。
+- 旧公共 schema + Markdown + 非流式 **17/17**，74.94秒，`.sandcastle/logs/rag_accept_d0991cbd8410.json`。
+- 公共知识 + Markdown + SSE **21/21**，52.48秒，`.sandcastle/logs/rag_accept_6ea3a143e9f2.json`。
+- 三条 RAG 均实跑导入、真实向量、RRF、reranker、实际模型、引用事实、会话保存/删除；独立 Milvus、MinIO、MongoDB资源清理通过。最终修复仅涉及摘要模块，没有改动上述 RAG 路径。
+- 真实浏览器验证摘要、关注增删与去重、名称代码/市场前缀冲突、历史补生成、休市失败、未来日期拒绝、读取503恢复、刷新持久状态、聊天SSE/非流式及390px无溢出。首轮浏览器验收记录13项：`.sandcastle/logs/summary_accept_d71ff9ef1a0147d4.json`。
+- 分页修复后再用真实浏览器与内存测试 API 验证：已有32条更新记录时，补生成2026-09-01不在最近30条，仍正确显示processing并自动更新completed；故障时failed保留成功结果、恢复重试completed；404不显示其他日期，延迟旧响应不覆盖新日期，390px无溢出。该组使用模拟行情验证UI边界，不冒充真实源验收。
+- 最终只读存储核对和8项UI边界记录在 `.sandcastle/logs/issue6-final-audit.json`：本轮主机摘要库、RAG测试库为空，本轮Milvus集合无残留，改动中敏感配置值匹配0。
+
+浏览器验收服务首轮被 Windows 中断停止时，Python finally 未运行；主协作者随后核对精确 UUID `summary_accept_d71ff9ef1a0147d4`、两个自建策略owner和三个测试日期，删除仅本轮7个MongoDB集合与1个Milvus集合，复查无残留。最终无服务的主机探针正常执行finally清理；后续内存UI探针通过受控关闭正常退出。没有修改业务库数据。
+
+## Standards
+
+独立审查发现3项 P2，全部修复并复核：
+
+1. 畸形日线 `klines=[null]` 未转为来源失败，阻断备用源；现在校验响应结构并统一转为 `MarketUnavailable`，真实适配路径的坏结构回归覆盖备用源接管。
+2. `@cache` 首次并发创建多个服务实例，绕过单进程生成槽；现在锁覆盖缓存检查与初始化，8线程实验只有一个实例，初始化失败关闭连接并允许重试。
+3. 主源未返回目标日但缓存已有时误报刷新成功；现在按本次来源返回日期判断，继续尝试备用源或明确显示目标日缓存警告。
+
+共3项，原最严重等级P2，遗留0；Fowler启发式无需要单列的高影响维护问题。
+
+## Spec
+
+独立审查发现2项 P2，全部修复并复核：
+
+1. 选中日期只从最近30条查找，老日期生成结果被最新摘要遮蔽且停止轮询；现在独立读取单日API，轮询所选日期，并隔离过期响应，支持日期切换、404和失败恢复。
+2. 个人策略选择未接收当日风险；现在已核实的指数/个股风险进入检索问题与模型上下文，模型只能关联服务端真实行情依据ID，完整日期/来源/缺失警告与策略原文一同展示，未知条件仍需人工确认。高/低风险变化回归验证检索、模型输入和最终依据均改变。
+
+共2项，原最严重等级P2，遗留0。未将市场阶段、实际持仓、策略全部前提或成交状态推定为已知。
+
+## 实测范围
+
+已验证单次真实调度执行及重试，没有等待多个真实收盘日来验证长期无人值守。风险阈值仍未经回测；PDF覆盖短文字PDF，未宣称长书籍、扫描件或全市场压测通过。查询服务需保持运行才能按时生成；停机后可手动补生成。

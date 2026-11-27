@@ -1,5 +1,6 @@
 """固定 default_user 的摘要与关注列表 API。"""
 import os
+import threading
 from datetime import date as calendar_date
 from functools import cache
 
@@ -13,6 +14,7 @@ from knowledge.service.summary_service import SummaryBusy, SummaryService
 from knowledge.summary.repository import SummaryInputError
 
 router = APIRouter(tags=["daily-summaries"])
+_summary_service_lock = threading.Lock()
 
 
 class GenerateRequest(BaseModel):
@@ -32,8 +34,13 @@ async def summary_validation_error(request, exc):
     return await request_validation_exception_handler(request, exc)
 
 
-@cache
 def get_summary_service():
+    with _summary_service_lock:
+        return _create_summary_service()
+
+
+@cache
+def _create_summary_service():
     mongo = None
     try:
         from pymongo import MongoClient
