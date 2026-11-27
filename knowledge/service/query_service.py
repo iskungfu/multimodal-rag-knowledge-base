@@ -78,15 +78,17 @@ class QueryService:
             error = "查询流程执行失败，请稍后重试。"
             answer = error
 
-        answer = finalize_answer(answer)
+        citation_ids = [str(document["chunk_id"]) for document in state.get("reranked_docs", []) if document.get("chunk_id") is not None]
+        answer = finalize_answer(answer, citation_ids)
         user_saved = save_chat_message(session_id, "user", safe_query,
                           rewritten_query=state.get("rewritten_query", ""),
                           item_names=state.get("item_names", []))
         saved = save_chat_message(session_id, "assistant", answer,
-                                  item_names=state.get("item_names", []))
+                                  item_names=state.get("item_names", []), citation_ids=citation_ids)
         if not saved or not user_saved:
             error = error or "回答已生成，但会话历史保存失败，请稍后重试。"
         set_task_result(task_id, "answer", answer)
+        set_task_result(task_id, "citation_ids", citation_ids)
         set_task_result(task_id, "error", error)
         update_task_status(task_id, TASK_STATUS_FAILED if error else TASK_STATUS_COMPLETED)
         if is_stream:
@@ -99,7 +101,7 @@ class QueryService:
     def get_answer(self, task_id: str) -> str:
         """获取任务生成的答案（未完成时返回空字符串）"""
         answer = get_task_result(task_id, "answer", "")
-        return finalize_answer(answer) if answer else ""
+        return finalize_answer(answer, get_task_result(task_id, "citation_ids", [])) if answer else ""
 
     def get_status(self, task_id: str) -> Dict[str, Any]:
         """获取任务状态 + 结果（供 /status 与 /query 非流式响应使用）"""
@@ -118,7 +120,7 @@ class QueryService:
             {
                 "session_id": record.get("session_id", ""),
                 "role": record.get("role", ""),
-                "text": finalize_answer(record.get("text", "")) if record.get("role") == "assistant" else redact_text(record.get("text", "")),
+                "text": finalize_answer(record.get("text", ""), record.get("citation_ids", [])) if record.get("role") == "assistant" else redact_text(record.get("text", "")),
                 "rewritten_query": redact_text(record.get("rewritten_query", "")),
                 "item_names": redact_value(record.get("item_names", [])),
                 "ts": record.get("ts"),

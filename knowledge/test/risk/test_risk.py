@@ -140,6 +140,55 @@ def test_verified_identity(resolver, query, code):
     assert resolver.resolve(query).security.code == code
 
 
+@pytest.mark.parametrize("query", ["股票600519现在的位置风险怎么样？", "600519近期成交量有没有异常？", "请查看600519目前处在什么位置，风险大不大？"])
+def test_explicit_verified_code_allows_question_descriptions(resolver, query):
+    result = resolver.resolve(query)
+    assert result.security.code == "600519"
+    assert result.security.name == "贵州茅台"
+    assert result.message is None
+
+
+def test_abbreviation_conflicting_with_explicit_code_requires_confirmation(resolver):
+    result = resolver.resolve("茅台000001风险")
+    assert result.security is None
+    assert "确认" in result.message
+
+
+@pytest.mark.parametrize("query", ["sz000001和sh000001风险", "000001.SH风险", "sz000001.SH风险", "600519.SZ风险"])
+def test_all_market_identifiers_are_checked(resolver, query):
+    result = resolver.resolve(query)
+    assert result.security is None
+    assert "确认" in result.message
+
+
+@pytest.mark.parametrize("query", ["我想买平安银行600519", "我最近买了平安银行600519", "我持有贵州茅台000001"])
+def test_natural_language_name_code_conflicts(resolver, query):
+    result = resolver.resolve(query)
+    assert result.security is None
+    assert "确认" in result.message
+
+
+@pytest.mark.parametrize("query", ["000001.SZ风险", "sz000001风险", "平安银行000001.SZ风险"])
+def test_consistent_market_identifiers_are_supported(resolver, query):
+    assert resolver.resolve(query).security.code == "000001"
+
+
+def test_index_fund_knowledge_question_does_not_request_stock_rating():
+    http = Mock()
+    http.get.side_effect = AssertionError("知识解释不调用证券源")
+    result = SymbolResolver(http).resolve("什么是指数基金的投资风险？")
+    assert result.knowledge and not result.security and not result.message
+    http.get.assert_not_called()
+
+
+def test_device_followup_does_not_require_security_source():
+    http = Mock()
+    http.get.side_effect = AssertionError("设备追问不调用证券源")
+    result = SymbolResolver(http).resolve("这款怎么接线？")
+    assert not result.security and not result.knowledge and not result.message
+    http.get.assert_not_called()
+
+
 @pytest.mark.parametrize("query", ["上证指数000001风险", "茅台风险", "贵州茅台000001风险", "000001和600519风险", "sh000001", "查询sh000001风险", "股票999999风险", "不存在股票风险"])
 def test_ambiguous_identity(resolver, query):
     result = resolver.resolve(query)

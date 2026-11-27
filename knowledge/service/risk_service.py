@@ -3,9 +3,9 @@
 from datetime import datetime, timedelta, timezone
 
 from knowledge.market.models import SHANGHAI, date_window
-from knowledge.risk.rules import N, evaluate, finite
+from knowledge.risk.rules import N, THRESHOLDS, evaluate, finite
 
-METRIC_NAMES = {"change_pct": "日涨跌幅", "turnover": "换手率", "volatility": "20 日波动率", "pe": "动态 PE", "volume_ratio": "成交量比"}
+METRIC_NAMES = {"change_pct": "日涨跌幅", "turnover": "换手率", "volatility": f"{N} 日波动率", "pe": "动态 PE", "volume_ratio": "成交量比"}
 
 
 def display_time(value):
@@ -84,7 +84,12 @@ class RiskService:
         if limited:
             warnings.append("资料有限，未观察到高值不等于低风险")
         lines.extend(dict.fromkeys(warnings))
-        lines.append("初始规则 v1：各指标取最高风险档；中/高阈值依次为 |日涨跌幅| 5%/9%、换手率 5%/15%、20 日波动率 2%/4%、动态 PE 40/80 倍、成交量比 2/3 倍。非正 PE 按高风险异常；量比 ≤0.2 为中、零量比为高。")
-        lines.append(f"N={N}；波动率是最近 20 条日线的源日涨跌幅样本标准差（不年化）；成交量比=当日成交量/此前 20 条日线平均成交量，不含当日。缺失不填零。")
+        thresholds = []
+        for key, (middle, high) in THRESHOLDS.items():
+            name = f"|{METRIC_NAMES[key]}|" if key == "change_pct" else METRIC_NAMES[key]
+            unit = "%" if key in {"change_pct", "turnover", "volatility"} else " 倍"
+            thresholds.append(f"{name} {middle:g}{unit}/{high:g}{unit}")
+        lines.append("初始规则 v1：各指标取最高风险档；中/高阈值依次为 " + "、".join(thresholds) + "。非正 PE 按高风险异常；量比 ≤0.2 为中、零量比为高。")
+        lines.append(f"N={N}；波动率是最近 {N} 条日线的源日涨跌幅样本标准差（不年化）；成交量比=当日成交量/此前 {N} 条日线平均成交量，不含当日。缺失不填零。")
         lines.append("以上为可解释的初始规则，未经回测；行业估值不可直接比较，不预测涨跌，不提供买卖建议。")
         return "\n\n".join(lines)

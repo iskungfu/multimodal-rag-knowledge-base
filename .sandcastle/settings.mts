@@ -39,6 +39,7 @@ export function loadSettings() {
     if (appConfig[name]) env[name] = appConfig[name];
   }
   env.AFK_TEST_DB_NAME = `sandcastle_test_${Date.now().toString(36)}`;
+  env.MONGO_DB_NAME = `${env.AFK_TEST_DB_NAME}_app`;
   const storageVenv = resolve(homedir(), ".local/share/shopkeeper-brain/storage-probe");
   const storagePython = resolve(storageVenv, "bin/python");
   env.AFK_STORAGE_PYTHON = storagePython;

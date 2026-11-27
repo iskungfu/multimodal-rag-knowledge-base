@@ -50,7 +50,8 @@ def save_chat_message(
         text: str,
         rewritten_query: str = "",
         item_names: Optional[List[str]] = None,
-        message_id: Optional[str] = None
+        message_id: Optional[str] = None,
+        citation_ids: Optional[List[str]] = None,
 ) -> str:
     """保存一条聊天消息，返回插入的文档 id（失败时返回空字符串）"""
     if not session_id or not text:
@@ -59,10 +60,11 @@ def save_chat_message(
     document = {
         "session_id": session_id,
         "role": role,
-        "text": finalize_answer(text) if role == "assistant" else redact_text(text),
+        "text": finalize_answer(text, citation_ids or []) if role == "assistant" else redact_text(text),
         "rewritten_query": redact_text(rewritten_query or ""),
         "item_names": redact_value(item_names or []),
         "message_id": message_id,
+        "citation_ids": list(citation_ids or []) if role == "assistant" else [],
         "ts": time.time(),
     }
 
@@ -84,7 +86,7 @@ def get_recent_messages(session_id: str, limit: int = 10) -> List[Dict[str, Any]
         collection = _get_collection()
 
         # 1. 按时间倒序取最近 limit 条
-        cursor = collection.find({"session_id": session_id}).sort("ts", -1).limit(limit)
+        cursor = collection.find({"session_id": session_id}).sort([("ts", -1), ("_id", -1)]).limit(limit)
         messages = list(cursor)
 
         # 2. 反转为正序，便于按对话顺序拼提示词
@@ -95,7 +97,7 @@ def get_recent_messages(session_id: str, limit: int = 10) -> List[Dict[str, Any]
             msg.pop("_id", None)
 
         for msg in messages:
-            msg["text"] = finalize_answer(msg.get("text", "")) if msg.get("role") == "assistant" else redact_text(msg.get("text", ""))
+            msg["text"] = finalize_answer(msg.get("text", ""), msg.get("citation_ids", [])) if msg.get("role") == "assistant" else redact_text(msg.get("text", ""))
             msg["rewritten_query"] = redact_text(msg.get("rewritten_query") or "")
             msg["item_names"] = redact_value(msg.get("item_names") or [])
         return messages

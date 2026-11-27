@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--stream", action="store_true")
     parser.add_argument("--pdf", action="store_true")
     parser.add_argument("--legacy", action="store_true")
+    parser.add_argument("--knowledge", action="store_true")
     args = parser.parse_args()
     from dotenv import load_dotenv
 
@@ -38,7 +39,7 @@ def main():
     })
     log_dir = ROOT / ".sandcastle/logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    report = {"run_id": run_id, "format": "pdf" if args.pdf else "markdown", "stream": args.stream, "legacy": args.legacy, "checks": {}, "cleanup": {}, "passed": False}
+    report = {"run_id": run_id, "format": "pdf" if args.pdf else "markdown", "stream": args.stream, "legacy": args.legacy, "knowledge": args.knowledge, "checks": {}, "cleanup": {}, "passed": False}
     console = sys.stdout
     started = time.monotonic()
     clients = None
@@ -156,6 +157,8 @@ def main():
                 observed = {}
                 query_module.query_app = query_module.query_app.with_config(callbacks=[Observer()])
                 question = "青禾 QH-731 复盘记录器执行离线复盘校验时，校验口令是什么，回看窗口设为多少个交易日？请引用手册。"
+                if args.knowledge:
+                    question = "根据公共知识资料，测试手册中的离线复盘校验口令和回看窗口分别是什么？请引用来源。"
                 with TestClient(query_api) as query_client:
                     response = query_client.post("/query", json={"query": question, "is_stream": args.stream})
                     check("query_http", response.status_code == 200)
@@ -176,6 +179,9 @@ def main():
                     else:
                         answer = result.get("answer", "")
                     report["answer"] = answer
+                    from knowledge.utils.answer_policy import DISCLAIMER
+
+                    check("answer_disclaimer", answer.endswith(DISCLAIMER) and answer.count(DISCLAIMER) == 1)
                     report["retrieval_counts"] = {key: len(value) for key, value in observed.items()}
                     check("rrf_retrieval", bool(observed.get("rrf_chunks")))
                     docs = observed.get("reranked_docs", [])

@@ -35,7 +35,7 @@ npm run sandcastle
 - `SANDCASTLE_WSL_DISTRO`：Windows 启动器读取的可选环境变量，默认 Ubuntu-24.04。
 - `PIP_INDEX_URL`：默认阿里云 PyPI 镜像，可在本机 `.env` 覆盖。
 
-存储连接从 `knowledge/.env` 按允许列表加载；应用 LLM 仅注入 `OPEN_API_BASE`、`OPEN_API_KEY`、`LLM_DEFAULT_MODEL`，用于无敏感文本的真实抽取验收。不会注入 MinerU 或 Web MCP 密钥。沙箱中的 MongoDB 写入测试使用每次启动生成的 `AFK_TEST_DB_NAME` 独立测试库。
+存储连接从 `knowledge/.env` 按允许列表加载；应用 LLM 仅注入 `OPEN_API_BASE`、`OPEN_API_KEY`、`LLM_DEFAULT_MODEL`，用于无敏感文本的真实抽取验收。不会注入 MinerU 或 Web MCP 密钥。沙箱中的 MongoDB 写入测试使用每次启动生成的 `AFK_TEST_DB_NAME` 独立测试库；默认应用 `MONGO_DB_NAME` 同时覆写为该名称加 `_app`，防止漏替换的存储路径写入业务库。两种测试库都需核对清理。
 
 在 Windows 更新本机凭据：
 

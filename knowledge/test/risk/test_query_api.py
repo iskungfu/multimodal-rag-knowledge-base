@@ -28,6 +28,36 @@ def events(response):
             for part in response.text.split('\n\n') if part.strip()]
 
 
+def test_history_with_identical_timestamps_preserves_message_order(monkeypatch):
+    from knowledge.utils import mongo_history_util
+
+    monkeypatch.setattr(mongo_history_util.time, "time", lambda: 1234567890.0)
+    for role, text in [("user", "问题一"), ("assistant", "回答一"), ("user", "问题二"), ("assistant", "回答二")]:
+        mongo_history_util.save_chat_message("same-time", role, text)
+    records = mongo_history_util.get_recent_messages("same-time", limit=3)
+    assert [record["role"] for record in records] == ["assistant", "user", "assistant"]
+    assert records[0]["text"].startswith("回答一")
+    assert records[-1]["text"].startswith("回答二")
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_verified_numeric_citation_survives_policy_and_history(streaming):
+    citation_id = "463123456789012345"
+    resolver = Mock()
+    resolver.resolve.return_value = Resolution(knowledge=True)
+    graph = Mock()
+    graph.invoke.side_effect = lambda state: {
+        **state,
+        "answer": f"参考 [chunk_id={citation_id}]。手机号：13800138000。未核实 [chunk_id=13800138000]。",
+        "reranked_docs": [{"chunk_id": citation_id, "content": "自建公共测试资料"}],
+    }
+    with api(QueryService(resolver=resolver, graph=graph)) as client:
+        answer = assert_answer(client, "公共知识引用", streaming)
+    assert f"[chunk_id={citation_id}]" in answer
+    assert "13800138000" not in answer
+    assert "138****8000" in answer
+
+
 def assert_answer(client, query, streaming):
     response = client.post('/query', json={'query': query, 'session_id': 'risk-test', 'is_stream': streaming})
     assert response.status_code == 200
