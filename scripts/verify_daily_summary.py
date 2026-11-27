@@ -8,6 +8,7 @@ import sys
 import threading
 import uuid
 from datetime import date, datetime, timedelta, time
+from time import monotonic
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -115,6 +116,21 @@ def main():
         market = MarketService(MarketQuoteRepository(stock_quotes))
         indices = IndexService(IndexRepository(index_quotes))
         service = SummaryService(SummaryRepository(summaries), WatchlistRepository(watches), indices, market, retriever)
+        original_select = service.model.select
+        def observed_select(items, evidence):
+            started = monotonic()
+            call = {'status': 'started'}
+            report.setdefault('model_calls', []).append(call)
+            try:
+                result = original_select(items, evidence)
+                call['status'] = 'completed'
+                return result
+            except Exception as exc:
+                call.update(status='failed', error_type=type(exc).__name__)
+                raise
+            finally:
+                call['seconds'] = round(monotonic() - started, 2)
+        service.model.select = observed_select
         service.add_watch('000001')
         now = service.now()
         _, end = date_window(None, None, now)
@@ -148,6 +164,8 @@ def main():
         with TestClient(app) as api:
             check('manual_generate_accepted', api.post('/daily-summaries/generate', json={'date': str(day)}).status_code == 202)
             record = api.get('/daily-summaries/' + str(day)).json()
+            report['manual'] = {'status': record.get('status'), 'attempts': record.get('attempts'),
+                                'error': record.get('error')}
             check('summary_completed', record['status'] == 'completed')
             answer = record['result']['answer']
             check('real_strategy_in_summary', bool(record['result']['strategies']) and '青鹭7391' in answer and '紫鹭8642' not in answer)
@@ -171,8 +189,12 @@ def main():
         scheduler.add_job(scheduler.get_job('daily-summary').func, 'date', id='accept-once')
         scheduler.start()
         try:
-            check('actual_scheduler_executor', event.wait(55) and summaries.count_documents({}) == 1 and
-                  summaries.find_one()['status'] == 'completed' and summaries.find_one()['attempts'] == 2)
+            finished = event.wait(270)
+            scheduled = summaries.find_one() or {}
+            report['scheduler'] = {'event_received': finished, 'status': scheduled.get('status'),
+                                   'attempts': scheduled.get('attempts'), 'error': scheduled.get('error')}
+            check('actual_scheduler_executor', finished and summaries.count_documents({}) == 1 and
+                  scheduled.get('status') == 'completed' and scheduled.get('attempts') == 2)
         finally:
             scheduler.shutdown(wait=True)
             service.now = old_now

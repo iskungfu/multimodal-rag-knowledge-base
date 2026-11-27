@@ -75,7 +75,7 @@
                 <label for="reviewText">写下交易经过、原因、教训或交易计划</label>
                 <textarea id="reviewText" rows="4" maxlength="10000" required
                           placeholder="例如：今天以 12.5 元买入 000001，因为突破后追高。反思应该等回踩，当时很着急。"></textarea>
-                <p class="answer-note">系统会提取复盘字段，并保留脱敏后的文本供核对。</p>
+                <p class="answer-note">系统会提取复盘字段，保存脱敏文本并建立检索索引；索引失败时可单独重试。</p>
                 <button class="btn btn-primary btn-sm" id="reviewSave" type="submit">保存复盘</button>
                 <button class="btn btn-ghost btn-sm" id="reviewRefresh" type="button">查看最近复盘</button>
             </form>
@@ -86,18 +86,18 @@
             <section class="chat-intro" id="chatIntro" aria-labelledby="introTitle">
                 <div class="intro-mark" data-icon="sparkles" data-icon-size="26" aria-hidden="true"></div>
                 <h1 id="introTitle">今天想了解什么？</h1>
-                <p>从产品手册与维修指南中检索答案，并给出可追溯的处理过程。</p>
+                <p>结合个人策略、投资知识、交易复盘与收盘行情，核对风险和操作前提，回答附带来源。</p>
 
                 <div class="suggestions">
                     <button class="suggestion" type="button"
-                            data-question="RS-12 数字万用表如何测量直流电压？">
+                            data-question="结合我的策略和复盘，追高前应该核对什么？">
                         <span data-icon="message" data-icon-size="16" aria-hidden="true"></span>
-                        <span>RS-12 数字万用表如何测量直流电压？</span>
+                        <span>结合我的策略和复盘，追高前应该核对什么？</span>
                     </button>
                     <button class="suggestion" type="button"
-                            data-question="设备无法开机时，应该按什么顺序排查？">
+                            data-question="我的复盘里计划买入的交易实际成交了吗？">
                         <span data-icon="message" data-icon-size="16" aria-hidden="true"></span>
-                        <span>设备无法开机时，应该按什么顺序排查？</span>
+                        <span>我的复盘里计划买入的交易实际成交了吗？</span>
                     </button>
                     <button class="suggestion" type="button"
                             data-question="平安银行（000001）的风险如何？">

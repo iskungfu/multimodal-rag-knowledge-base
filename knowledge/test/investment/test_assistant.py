@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from knowledge.api.query_api import create_app
 from knowledge.core.deps import get_query_service
-from knowledge.investment.generation import parse_source_selections, render_answer, validate_selections, rerank
+from knowledge.investment.generation import EvidenceSelector, parse_source_selections, render_answer, validate_selections, rerank
 from knowledge.investment.retrieval import InvestmentRetriever, fuse
 from knowledge.investment.routing import route_query
 from knowledge.risk.symbols import Resolution, Security
@@ -61,7 +61,7 @@ def test_rrf_preserves_same_numeric_id_across_sources_and_deduplicates_within_ro
 
 @pytest.mark.parametrize("wrapped", [False, True])
 def test_source_selection_accepts_identifiers_without_model_recopy(wrapped):
-    content = '{"selections":[{"reference":"E1","evidence_ids":[]}]}'
+    content = '{"selections":[{"reference":"E1"}]}'
     if wrapped:
         content = "```json\n" + content + "\n```"
     assert parse_source_selections(content).selections[0].reference == "E1"
@@ -70,11 +70,35 @@ def test_source_selection_accepts_identifiers_without_model_recopy(wrapped):
 @pytest.mark.parametrize("content", [
     '{"selections":[],"selections":[{"reference":"E1"}]}',
     '{"selections":[{"reference":"E1","advice":"立即买入"}]}',
+    '{"selections":[{"reference":"E1","evidence_ids":["行情依据id"]}]}',
     '{"selections":[{"reference":"E1"}]} {}',
 ])
 def test_model_extra_advice_duplicate_fields_and_multiple_json_rejected(content):
     with pytest.raises(ValueError):
         parse_source_selections(content)
+
+
+@pytest.mark.parametrize("recover", [False, True])
+def test_model_selection_retry_is_bounded_and_revalidates_sources(monkeypatch, recover):
+    import knowledge.investment.generation as generation
+    client = Mock()
+    client.__enter__ = Mock(return_value=client)
+    client.__exit__ = Mock(return_value=False)
+    def response(content):
+        return SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content=content))])
+    bad = response('{"selections":[{"reference":"E999"}]}')
+    good = response('{"selections":[{"reference":"E1"}]}')
+    client.chat.completions.create.side_effect = [bad, good if recover else bad]
+    monkeypatch.setattr(generation, "OpenAI", lambda **kwargs: client)
+    for key in ("OPEN_API_BASE", "OPEN_API_KEY", "LLM_DEFAULT_MODEL"):
+        monkeypatch.setenv(key, "test")
+    if recover:
+        result = EvidenceSelector().select("复盘", [document("review")], [])
+        assert result["selections"][0]["quote"] == document("review")["content"]
+    else:
+        with pytest.raises(ValueError):
+            EvidenceSelector().select("复盘", [document("review")], [])
+    assert client.chat.completions.create.call_count == 2
 
 
 def test_three_routes_answer_preserves_conditions_plans_market_and_provenance():
@@ -220,6 +244,14 @@ def test_named_trade_with_stop_loss_keeps_stock_resolution():
     result = route_query("贵州茅台买入后怎么止损？", resolver, [])
     assert result["resolution"].security.code == "600519"
     resolver.resolve.assert_called_once()
+
+
+@pytest.mark.parametrize("query", ["我的复盘中计划买入的那笔记录实际成交了吗？", "我计划买入后的复盘教训是什么？"])
+def test_review_plans_are_not_treated_as_named_security_queries(query):
+    resolver = Mock()
+    result = route_query(query, resolver, [])
+    assert result["investment"] and not result["resolution"].security
+    resolver.resolve.assert_not_called()
 
 
 def test_followup_uses_only_recent_user_context_and_rechecks_security():

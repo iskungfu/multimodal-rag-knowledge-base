@@ -8,6 +8,7 @@ MARKET = re.compile(r"大盘|上证指数|深证成指|sh000001|sz399001", re.I)
 FOLLOWUP = re.compile(r"^(?:(?:那|那么)?(?:它|这只(?:股票)?|该股|这笔(?:交易)?|那笔(?:交易)?|这条策略)?(?:呢|风险(?:大吗|高吗|如何|怎么样)|还能买吗|能买吗|可以买(?:吗)?|怎么(?:办|操作|止损)|该怎么办|实际成交了吗)|继续|具体说说|为什么|怎么办)[？?。\s]*$")
 MARKET_WORDS = re.compile(r"大盘|上证指数|深证成指|sh000001|sz399001", re.I)
 MARKET_ONLY = re.compile(r"[，、。？?\s]|结合|按照|按|看下|请|帮我|分析|一下|现在|当前|的|位置|风险|高低|高吗|大吗|怎么样|如何|趋势|行情|判断|看看|查询")
+TRADE_CONTEXT = re.compile(r"我的|我们|本人|我|以前|之前|上次|这次|今天|明天|昨天|计划|准备|打算|想要|已经|当时|记录|交易|复盘|的|中")
 
 
 def current_security_query(query):
@@ -42,7 +43,8 @@ def route_query(query, resolver, history):
         resolution = resolver.resolve(current_security_query(remainder))
         return {"resolution": resolution, "query": query, "investment": True, "market": True}
     security_question = bool(re.search(r"风险|股价|走势|能不能买|能买吗|可以买|估值", query))
-    named_trade = bool(re.search(r"[\u4e00-\u9fff]{2,12}(?:买入|卖出|买了|卖了|持有|持仓)", current_security_query(query)))
+    trade_names = re.findall(r"([\u4e00-\u9fff]{2,12})(?:买入|卖出|买了|卖了|持有|持仓)", current_security_query(query))
+    named_trade = any(len(TRADE_CONTEXT.sub("", name)) >= 2 for name in trade_names)
     if PERSONAL.search(query) and not explicit_stock and not security_question and not named_trade:
         resolution = Resolution(knowledge=True)
     else:
