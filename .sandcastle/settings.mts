@@ -24,6 +24,7 @@ export function loadSettings() {
     PIP_INDEX_URL: process.env.PIP_INDEX_URL || "https://mirrors.aliyun.com/pypi/simple",
     PIP_CONFIG_FILE: "/dev/null",
     PIP_DISABLE_PIP_VERSION_CHECK: "1",
+    DAILY_SUMMARY_ENABLED: "0",
   };
   for (const name of ["GH_TOKEN", "CODEX_API_KEY", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"]) {
     if (process.env[name]) env[name] = process.env[name]!;
