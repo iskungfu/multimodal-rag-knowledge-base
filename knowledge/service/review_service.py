@@ -33,12 +33,10 @@ class ReviewService:
             except ExtractionUnavailable:
                 error = "model_unavailable"
             except Exception:
-                # 包括 JSON、schema、原文依据校验失败，不保存不可信的局部字段。
                 error = "invalid_extraction"
             try:
                 document.update(self.repository.finish(document["_id"], DEFAULT_OWNER, extraction, error))
             except PyMongoError:
-                # 首次插入已成功；不把抽取更新故障误报为整条复盘未保存。
                 result = present(document)
                 result["warning"] = "复盘文本已保存，抽取结果未能写入，请稍后查看原文。"
                 return result

@@ -17,7 +17,6 @@ router = APIRouter(prefix="/reviews", tags=["reviews"])
 
 @cache
 def get_review_service():
-    # 独立轻量客户端，复盘无需导入 Milvus/embedding 或连接其他存储。
     client = None
     try:
         client = MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000,

@@ -74,12 +74,11 @@ def parse_extraction(content: str, source: str) -> dict:
             raise ValueError("代码并非独立的六位数字")
         if event.price is not None:
             numbers = re.findall(r"(?<![0-9.])[0-9]+(?:\.[0-9]+)?(?![0-9.])", event.evidence)
-            if Decimal(str(event.price)) not in {Decimal(n) for n in numbers}:
+            if Decimal(str(event.price)) not in {Decimal(number) for number in numbers}:
                 raise ValueError("价格缺少原文依据")
         item = event.model_dump()
         item["mentioned_stock_code"] = item["stock_code"]
         if event.identity_conflict:
-            # 原文代码仍可核对，但不把有争议的标的用于后续股票关联。
             item["stock_code"] = None
         events.append(item)
     return {"events": events, "lesson": result.lesson, "emotions": result.emotions}
@@ -88,7 +87,6 @@ def parse_extraction(content: str, source: str) -> dict:
 class ReviewExtractor:
     def extract(self, text: str) -> dict:
         try:
-            # 每次调用有界超时、不自动重试；凭据缺失也走原文保存降级。
             with OpenAI(
                 base_url=os.environ["OPEN_API_BASE"], api_key=os.environ["OPEN_API_KEY"],
                 timeout=45.0, max_retries=0,
@@ -103,6 +101,5 @@ class ReviewExtractor:
                     raise ExtractionUnavailable()
                 content = choice.message.content
         except Exception:
-            # 不传播 SDK 错误，其中可能包含服务地址、凭据或请求文本。
             raise ExtractionUnavailable("模型调用失败") from None
         return parse_extraction(content, text)

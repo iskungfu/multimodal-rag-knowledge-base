@@ -173,7 +173,6 @@ def test_input_validation_does_not_save(components, payload):
 
 def test_redaction_before_model_storage_and_read(components):
     collection, extractor, service = components
-    # 全部为自建虚构字段，仅用于验证规则，不使用真实个人信息。
     source = "姓名：张小甲，手机号 13900001234，身份证 110101199001011234，银行卡 6222000011112222，持仓金额 523456 元。买入单价 12.5 元，代码 000001。"
     safe = redact_text(source)
     for private in ["张小甲", "13900001234", "110101199001011234", "6222000011112222", "523456"]:
@@ -186,6 +185,5 @@ def test_redaction_before_model_storage_and_read(components):
         assert body["original_text"] == safe
         extractor.extract.assert_called_once_with(safe)
         assert collection.find_one()["original_text"] == safe
-        # 模拟历史记录仍含敏感信息，读取边界再次扫描。
         collection.update_one({"_id": body["id"], "owner_id": DEFAULT_OWNER}, {"$set": {"original_text": source}})
         assert client.get(f'/reviews/{body["id"]}').json()["original_text"] == safe

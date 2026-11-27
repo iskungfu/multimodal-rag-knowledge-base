@@ -93,7 +93,7 @@ def test_live_model_api_and_mongodb(collection, case, text):
         assert events[0]["stock_name"] is None and events[0]["price"] is None and events[0]["reason"] is None
         assert extraction["lesson"] is None and extraction["emotions"] == []
     elif case == "mixed":
-        assert [(e["status"], e["direction"], e["price"]) for e in events] == [
+        assert [(event["status"], event["direction"], event["price"]) for event in events] == [
             ("executed", "buy", 12.5), ("executed", "sell", 13), ("planned", "buy", 12),
         ]
     elif case == "unfilled":
