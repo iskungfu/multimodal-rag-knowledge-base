@@ -14,7 +14,7 @@
 
 ## 本项目的检查点
 
-1. 读取 `.sandcastle/results/` 跳过已完成任务；用 GitHub 原生依赖检查 blocker。保持 OPEN 的 blocker 不因本地已有实现而自动解除。
+1. 读取 `.sandcastle/results/` 跳过已完成任务；用 GitHub 原生依赖检查 blocker。保持 OPEN 的 blocker 不因本地已有实现而自动解除。用户授权沿已验收分支继续时，可在本轮 prompt 中逐项记录目标工单、前置实现/验收 commit、祖先关系与实测报告，作为仅该分支使用的开发依赖凭据；不得据此改写 GitHub 依赖或将工单视为已发布。没有明确凭据的 OPEN blocker 仍然阻塞。
 2. 沙箱使用 Linux 临时 venv；主机已有模型和浏览器由主协作者复用，不重复下载大模型或 Chromium。
 3. 单元测试与真实验收分开记录。使用随机测试库、collection 和 bucket，检查清理结果；不得将 mock 通过当作真实模型通过。
 4. 新功能需验证旧数据 schema、故障恢复、用户隔离、Windows 行为和真实框架返回类型。随机 ID 的回归使用固定反例，避免概率性漏检。
