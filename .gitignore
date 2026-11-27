@@ -21,7 +21,7 @@ wheels/
 *.egg
 
 # ===== 虚拟环境 =====
-.venv/
+.venv
 venv/
 ENV/
 env/

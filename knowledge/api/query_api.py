@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
+from knowledge.api.market_api import router as market_router
 from knowledge.core.deps import get_query_service
 from knowledge.core.paths import get_front_page_dir
 from knowledge.processor.query_processor.base import setup_logging
@@ -161,6 +162,7 @@ def create_app() -> FastAPI:
         app.mount("/front", StaticFiles(directory=front_dir))
 
     register_router(app)
+    app.include_router(market_router)
     return app
 
 
