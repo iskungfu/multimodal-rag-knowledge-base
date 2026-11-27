@@ -66,3 +66,9 @@ python3 -m venv ~/.local/share/shopkeeper-brain/storage-probe
 
 VMware/CentOS 的 MongoDB、Milvus REST、MinIO 已分别从 WSL 和 bwrap 沙箱验证读取成功。此检查不等于业务验收；完整 Python 应用依赖、模型文件、Milvus gRPC/向量检索和业务写入仍由相应任务验证。
 不能把 Windows 的 localhost 地址直接当作 WSL 或虚拟机中的服务地址。
+
+## 主机补验
+
+沙箱不包含本机 BGE 模型、MinerU 凭据或浏览器。不要在每轮中重复下载模型或 Chromium；先完成小依赖的单元测试和独立存储验证，再由主协作者使用 Windows 既有 Python 环境与浏览器执行完整 RAG、PDF 与界面验收。结果须区分“沙箱通过”和“待主机验收”，补验完成后再记录最终结论和 push。
+
+2026-11-27 的 #3 曾因沙箱浏览器下载耗时而改用主机浏览器完成验收。后续轮次沿用此分工，避免相同环境准备重复消耗时间。
