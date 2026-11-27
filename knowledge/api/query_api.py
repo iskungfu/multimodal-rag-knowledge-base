@@ -141,7 +141,7 @@ def register_router(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     """创建查询服务 FastAPI 应用"""
     app = FastAPI(
-        title="掌柜智库查询服务",
+        title="多模态RAG智能知识库查询服务",
         description="知识库查询流程 API",
         version="1.0",
     )

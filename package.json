@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "scripts": {
+    "sandcastle": "node .sandcastle/launch.mjs run",
+    "sandcastle:check": "node .sandcastle/launch.mjs check"
+  },
+  "devDependencies": {
+    "@ai-hero/sandcastle": "0.14.0",
+    "tsx": "4.23.15"
+  }
+}

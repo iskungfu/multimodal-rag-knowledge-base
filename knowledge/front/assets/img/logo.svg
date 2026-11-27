@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="多模态RAG智能知识库">
+    <rect width="32" height="32" rx="9" fill="#2563EB"/>
+    <path d="M8.5 10.5A1.5 1.5 0 0 1 10 9h4.2a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5H10a1.5 1.5 0 0 1-1.5-1.5v-12Z"
+          fill="#FFFFFF" fill-opacity="0.55"/>
+    <path d="M16.3 8.5A1.5 1.5 0 0 1 17.8 7h4.2a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5h-4.2a1.5 1.5 0 0 1-1.5-1.5v-12Z"
+          fill="#FFFFFF"/>
+    <circle cx="15.5" cy="7.5" r="2.2" fill="#67E8F9"/>
+</svg>

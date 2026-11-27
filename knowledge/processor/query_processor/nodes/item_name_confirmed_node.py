@@ -3,9 +3,7 @@ import re
 from logging import Logger
 from typing import Dict, Any, List, Tuple
 
-from Demos.win32ts_logoff_disconnected import session
 from langchain_core.messages import SystemMessage, HumanMessage
-from openai.types.beta.chatkit.chat_session_chatkit_configuration_param import History
 
 from knowledge.processor.query_processor.base import BaseNode
 from knowledge.processor.query_processor.config import QueryConfig

@@ -2,7 +2,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 服务名称 | 掌柜智库查询服务 |
+| 服务名称 | 多模态RAG智能知识库查询服务 |
 | Base URL | `http://127.0.0.1:8001` |
 | 实现文件 | `knowledge/api/query_api.py`、`knowledge/service/query_service.py`、`knowledge/schema/query_schema.py` |
 | 对应前端 | `knowledge/front/chat.html` |
@@ -148,11 +148,13 @@ data: <json>
 
 ### 4.2 `delta` —— LLM 流式增量
 
+后端当前推送字段为 `answer`：
+
 ```json
-{ "delta": "使用 RS PRO" }
+{ "answer": "使用 RS PRO" }
 ```
 
-前端把多个 `delta` 累加为完整答案并实时渲染。
+前端把多个 `delta` 事件中的增量累加为完整答案并实时渲染。为兼容不同版本，前端同时接受 `delta` / `content` 字段。
 
 ### 4.3 `final` —— 最终答案 / 连接结束
 

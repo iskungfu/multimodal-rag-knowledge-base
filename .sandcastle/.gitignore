@@ -1,0 +1,5 @@
+.env
+codex.local.toml
+logs/
+worktrees/
+patches/
