@@ -7,7 +7,6 @@ from pathlib import Path
 import shutil
 import sys
 import time
-import traceback
 import uuid
 
 
@@ -25,11 +24,16 @@ def main():
     from dotenv import load_dotenv
 
     load_dotenv(ROOT / "knowledge/.env")
+    test_db = os.getenv("AFK_TEST_DB_NAME")
+    if not test_db or test_db in {os.getenv("MONGO_DB_NAME"), "kb001", "admin", "config", "local"}:
+        print("必须提供独立 AFK_TEST_DB_NAME。")
+        return 1
     run_id = "rag_accept_" + uuid.uuid4().hex[:12]
     collections = [run_id + "_items", run_id + "_chunks"]
     bucket = run_id.replace("_", "-")
     os.environ.update({
-        "MONGO_DB_NAME": run_id,
+        "MONGO_DB_NAME": test_db,
+        "DAILY_SUMMARY_ENABLED": "0",
         "ITEM_NAME_COLLECTION": collections[0],
         "CHUNKS_COLLECTION": collections[1],
         "MINIO_BUCKET_NAME": bucket,
@@ -43,6 +47,8 @@ def main():
     console = sys.stdout
     started = time.monotonic()
     clients = None
+    history_collection = None
+    original_history_collection = None
     local_paths = []
 
     def check(name, passed, detail=None):
@@ -70,7 +76,11 @@ def main():
                 milvus = clients.get_milvus_client()
                 check("milvus_grpc", isinstance(milvus.list_collections(timeout=15), list))
                 check("isolated_collections", not any(milvus.has_collection(name) for name in collections))
-                check("isolated_database", run_id not in mongo.list_database_names())
+                from knowledge.utils import mongo_history_util
+                history_collection = mongo[test_db][run_id + "_history"]
+                check("isolated_history", history_collection.name not in mongo[test_db].list_collection_names())
+                original_history_collection = mongo_history_util._get_collection
+                mongo_history_util._get_collection = lambda: history_collection
 
                 if args.legacy:
                     from pymilvus import DataType
@@ -196,7 +206,7 @@ def main():
                 report["passed"] = True
             except Exception as exc:
                 report["error_type"] = type(exc).__name__
-                traceback.print_exc()
+                print("验收异常详情已隐藏：" + type(exc).__name__)
             finally:
                 if clients:
                     for name in collections:
@@ -217,7 +227,10 @@ def main():
                     except Exception:
                         report["cleanup"]["minio"] = False
                     try:
-                        clients.get_mongo_client().drop_database(run_id)
+                        if original_history_collection:
+                            mongo_history_util._get_collection = original_history_collection
+                        if history_collection is not None:
+                            history_collection.drop()
                         report["cleanup"]["mongo"] = True
                     except Exception:
                         report["cleanup"]["mongo"] = False

@@ -937,3 +937,16 @@
         min-width: 360px;
     }
 }
+
+.summary-panel { min-width: 0; }
+.summary-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-block: 12px; }
+.summary-controls input { min-width: 0; max-width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.summary-controls input[type="text"], #watchQuery { flex: 1 1 140px; }
+.watch-list, .summary-history { padding-left: 20px; overflow-wrap: anywhere; }
+.summary-content { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 32rem; overflow-y: auto; }
+.summary-panel p, .summary-panel button { overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+    .summary-controls { align-items: stretch; }
+    .summary-controls label { flex-basis: 100%; }
+    .summary-history button { white-space: normal; text-align: left; }
+}

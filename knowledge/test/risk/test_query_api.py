@@ -18,7 +18,7 @@ from knowledge.test.risk.test_risk import resolver, NOW, quotes
 
 
 def api(service):
-    app = create_app()
+    app = create_app(summary_enabled=False)
     app.dependency_overrides[get_query_service] = lambda: service
     return TestClient(app)
 

@@ -46,7 +46,11 @@ def main():
         mongo_history_util._get_collection = lambda: history
         market_service = MarketService(MarketQuoteRepository(market))
         service = QueryService(risk=RiskService(lambda: market_service))
-        app = create_app()
+        app = create_app(summary_enabled=False)
+        from knowledge.api.summary_api import get_summary_service
+        def unavailable_summary():
+            raise HTTPException(404, "此验收服务仅提供聊天与行情")
+        app.dependency_overrides[get_summary_service] = unavailable_summary
         app.dependency_overrides[get_query_service] = lambda: service
         app.dependency_overrides[get_market_service] = lambda: market_service
         def unavailable_review():

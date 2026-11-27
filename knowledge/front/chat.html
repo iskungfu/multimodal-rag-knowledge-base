@@ -48,6 +48,27 @@
 
 <main class="chat-shell" id="main">
     <div class="chat-scroll" id="scroller">
+        <details class="review-panel summary-panel" id="summaryPanel" open>
+            <summary>每日投资摘要与关注股票</summary>
+            <p class="answer-note">Asia/Shanghai 收盘后生成；离线期间可手动补生成。关注列表不代表实际持仓。</p>
+            <form id="watchForm" class="summary-controls">
+                <label for="watchQuery">关注股票</label>
+                <input id="watchQuery" maxlength="80" required placeholder="完整股票名称或代码">
+                <button class="btn btn-primary btn-sm" id="watchAdd" type="submit">添加关注</button>
+            </form>
+            <p id="watchStatus" role="status" aria-live="polite"></p>
+            <ul id="watchList" class="watch-list"></ul>
+            <div class="summary-controls">
+                <label for="summaryDate">收盘日期</label>
+                <input id="summaryDate" type="date" required>
+                <button class="btn btn-primary btn-sm" id="summaryGenerate" type="button">生成 / 补生成</button>
+                <button class="btn btn-ghost btn-sm" id="summaryRetry" type="button">重试 / 重新生成</button>
+                <button class="btn btn-ghost btn-sm" id="summaryRefresh" type="button">刷新</button>
+            </div>
+            <p id="summaryStatus" role="status" aria-live="polite"></p>
+            <div id="summaryContent" class="summary-content"></div>
+            <details><summary>最近摘要记录</summary><ul id="summaryHistory" class="summary-history"></ul></details>
+        </details>
         <details class="review-panel" id="reviewPanel">
             <summary>交易复盘</summary>
             <form id="reviewForm">
@@ -129,5 +150,6 @@
 
 <script type="module" src="/front/assets/js/chat.js"></script>
 <script type="module" src="/front/assets/js/reviews.js"></script>
+<script type="module" src="/front/assets/js/summaries.js"></script>
 </body>
 </html>

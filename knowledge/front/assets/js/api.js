@@ -260,3 +260,15 @@ export function connectStream(taskId, handlers = {}) {
         },
     };
 }
+
+/* 每日投资摘要；生成请求立即返回，随后读取持久化状态。 */
+export const fetchWatchlist = () => request('/watchlist');
+export const addWatch = (query) => request('/watchlist', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({query}),
+});
+export const deleteWatch = (code) => request(`/watchlist/${encodeURIComponent(code)}`, {method: 'DELETE'});
+export const fetchLatestSummary = () => request('/daily-summaries/latest');
+export const fetchSummaryHistory = () => request('/daily-summaries?limit=30');
+export const generateSummary = (date, retry = false) => request('/daily-summaries/generate', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({date, retry}),
+});

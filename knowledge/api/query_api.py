@@ -16,11 +16,14 @@ import os
 import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
 from knowledge.api.market_api import router as market_router
 from knowledge.api.review_api import router as review_router
+from knowledge.api.summary_api import router as summary_router, summary_validation_error
+from knowledge.summary.scheduler import summary_lifespan
 from knowledge.core.deps import get_query_service
 from knowledge.core.paths import get_front_page_dir
 from knowledge.processor.query_processor.base import setup_logging
@@ -143,12 +146,13 @@ def register_router(app: FastAPI) -> None:
         return {"message": "History cleared", "deleted_count": deleted_count}
 
 
-def create_app() -> FastAPI:
+def create_app(*, summary_enabled=None) -> FastAPI:
     """创建查询服务 FastAPI 应用"""
     app = FastAPI(
         title="多模态RAG智能知识库查询服务",
         description="知识库查询流程 API",
         version="1.0",
+        lifespan=summary_lifespan(summary_enabled),
     )
 
     # 跨域配置
@@ -168,6 +172,8 @@ def create_app() -> FastAPI:
     register_router(app)
     app.include_router(market_router)
     app.include_router(review_router)
+    app.include_router(summary_router)
+    app.add_exception_handler(RequestValidationError, summary_validation_error)
     return app
 
 
