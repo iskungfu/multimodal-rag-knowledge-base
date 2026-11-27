@@ -83,9 +83,9 @@ class QueryService:
                     except Exception:
                         risk_answer = "行情服务暂不可用，无法判断当前个股风险。"
                     market = [{"id": "stock:" + security["code"], "text": risk_answer}]
-                elif route["market"]:
+                if route["market"]:
                     from knowledge.investment.market import index_context
-                    market = index_context()
+                    market.extend(index_context())
                 state.update(self.investment.answer(route["query"], market_context=market))
                 answer = state["answer"]
                 context = {"investment": True, "query": route["query"][:1500], "security": security, "market": route["market"]}

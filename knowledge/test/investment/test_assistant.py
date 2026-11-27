@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from knowledge.api.query_api import create_app
 from knowledge.core.deps import get_query_service
-from knowledge.investment.generation import render_answer, validate_selections, rerank
+from knowledge.investment.generation import parse_source_selections, render_answer, validate_selections, rerank
 from knowledge.investment.retrieval import InvestmentRetriever, fuse
 from knowledge.investment.routing import route_query
 from knowledge.risk.symbols import Resolution, Security
@@ -57,6 +57,24 @@ def test_rrf_preserves_same_numeric_id_across_sources_and_deduplicates_within_ro
     assert len(result) == 3
     assert {item["source"] for item in result} == {"personal", "knowledge", "review"}
     assert all(item["score"] == 1 / 61 for item in result)
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_source_selection_accepts_identifiers_without_model_recopy(wrapped):
+    content = '{"selections":[{"reference":"E1","evidence_ids":[]}]}'
+    if wrapped:
+        content = "```json\n" + content + "\n```"
+    assert parse_source_selections(content).selections[0].reference == "E1"
+
+
+@pytest.mark.parametrize("content", [
+    '{"selections":[],"selections":[{"reference":"E1"}]}',
+    '{"selections":[{"reference":"E1","advice":"立即买入"}]}',
+    '{"selections":[{"reference":"E1"}]} {}',
+])
+def test_model_extra_advice_duplicate_fields_and_multiple_json_rejected(content):
+    with pytest.raises(ValueError):
+        parse_source_selections(content)
 
 
 def test_three_routes_answer_preserves_conditions_plans_market_and_provenance():
@@ -125,6 +143,83 @@ def test_product_and_explicit_conflict_do_not_inherit_stock():
     assert not product["investment"]
     conflict = route_query("贵州茅台000001风险", resolver, history)
     assert "冲突" in conflict["resolution"].message
+
+
+def test_named_stock_risk_with_personal_strategy_still_checks_security():
+    resolver = Mock()
+    resolver.resolve.return_value = Resolution(security=Security("600519", "贵州茅台"))
+    result = route_query("按我的交易策略，贵州茅台风险大吗", resolver, [])
+    assert result["resolution"].security.code == "600519"
+    resolver.resolve.assert_called_once()
+
+
+def test_named_stock_in_followup_overrides_prior_security():
+    resolver = Mock()
+    resolver.resolve.return_value = Resolution(security=Security("000001", "平安银行"))
+    history = [{"role": "user", "query_context": {"investment": True, "query": "贵州茅台风险", "security": {"code": "600519", "name": "贵州茅台"}}}]
+    result = route_query("这只平安银行风险大吗？", resolver, history)
+    assert result["resolution"].security.code == "000001"
+    assert "平安银行" in resolver.resolve.call_args.args[0]
+    assert "贵州茅台" not in resolver.resolve.call_args.args[0]
+
+
+def test_generic_investment_question_and_elliptical_followup():
+    resolver = Mock()
+    assert route_query("如何设置止损？", resolver, [])["investment"]
+    resolver.resolve.assert_not_called()
+    resolver.resolve.return_value = Resolution(security=Security("000001", "平安银行"))
+    history = [{"role": "user", "query_context": {"investment": True, "query": "000001风险", "security": {"code": "000001", "name": "平安银行"}}}]
+    result = route_query("还能买吗？", resolver, history)
+    assert result["resolution"].security.code == "000001"
+
+
+@pytest.mark.parametrize("question", ["结合大盘，贵州茅台风险大吗？", "结合大盘，贵州茅台600519风险大吗？"])
+def test_combined_market_and_stock_keeps_both_contexts(question):
+    resolver = Mock()
+    resolver.resolve.return_value = Resolution(security=Security("600519", "贵州茅台"))
+    result = route_query(question, resolver, [])
+    assert result["market"] and result["resolution"].security.code == "600519"
+    assert "大盘" not in resolver.resolve.call_args.args[0]
+
+
+def test_query_delivers_stock_and_index_context_together(monkeypatch):
+    from knowledge.investment import market
+    monkeypatch.setattr(market, "index_context", lambda: [{"id": "index:sh000001", "text": "指数当前位置中风险"}])
+    resolver = Mock()
+    resolver.resolve.return_value = Resolution(security=Security("600519", "贵州茅台"))
+    investment = assistant()
+    service = QueryService(resolver, SimpleNamespace(answer=lambda security: "贵州茅台高风险"), investment=investment)
+    app = create_app(summary_enabled=False)
+    app.dependency_overrides[get_query_service] = lambda: service
+    with TestClient(app) as client:
+        answer = client.post("/query", json={"query": "结合大盘，贵州茅台风险大吗？"}).json()["answer"]
+    assert "贵州茅台高风险" in answer and "指数当前位置中风险" in answer
+
+
+def test_stock_noun_followup_uses_context_without_swallowing_new_name():
+    resolver = Mock()
+    resolver.resolve.return_value = Resolution(security=Security("000001", "平安银行"))
+    history = [{"role": "user", "query_context": {"investment": True, "query": "000001风险", "security": {"code": "000001", "name": "平安银行"}}}]
+    assert route_query("这只股票风险高吗？", resolver, history)["resolution"].security.code == "000001"
+    resolver.resolve.assert_called_with("000001 平安银行")
+    route_query("它就是贵州茅台吗？", resolver, history)
+    assert "贵州茅台" in resolver.resolve.call_args.args[0]
+
+
+@pytest.mark.parametrize("query", ["上证指数600519风险大吗？", "上证指数（000001）", "上证指数代码000001"])
+def test_index_name_with_stock_code_requires_clarification(query):
+    resolver = Mock()
+    result = route_query(query, resolver, [])
+    assert result["resolution"].message and not result["resolution"].security
+    resolver.resolve.assert_not_called()
+
+
+def test_named_trade_with_stop_loss_keeps_stock_resolution():
+    resolver = Mock()
+    resolver.resolve.return_value = Resolution(security=Security("600519", "贵州茅台"))
+    result = route_query("贵州茅台买入后怎么止损？", resolver, [])
+    assert result["resolution"].security.code == "600519"
+    resolver.resolve.assert_called_once()
 
 
 def test_followup_uses_only_recent_user_context_and_rechecks_security():

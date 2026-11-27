@@ -520,6 +520,8 @@ class Acceptance:
         self.app = app
 
     def selected_checks(self, name, state, require_facts=False):
+        if state.get("selection_status") != "completed":
+            self.report.setdefault("selection_failures", {})[name] = state.get("selection_error", "unknown")
         self.check(name + "_real_selector_success", state.get("selection_status") == "completed"
                    and bool(self.selector.calls) and self.selector.calls[-1]["result"] is not None)
         self.check(name + "_real_rerank_success", state.get("rerank_status") == "completed"

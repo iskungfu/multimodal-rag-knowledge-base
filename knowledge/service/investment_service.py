@@ -16,6 +16,7 @@ class InvestmentState(TypedDict, total=False):
     reranked_docs: list[dict]
     rerank_status: str
     selection_status: str
+    selection_error: str
     answer: str
 
 
@@ -56,15 +57,17 @@ class InvestmentAssistant:
     def _answer(self, state):
         documents = distinct_records(state["reranked_docs"])
         status = "empty"
+        error = ""
         if documents:
             try:
                 value = self.selector.select(state["query"], documents, state["market"])
                 documents = validate_selections(value, documents, state["market"])
                 status = "completed"
-            except Exception:
+            except Exception as failure:
                 status = "failed"
+                error = type(failure).__name__
         answer = render_answer(documents, state["market"], state["routes"], status, state["rerank_status"])
-        return {"answer": answer, "selection_status": status, "reranked_docs": documents}
+        return {"answer": answer, "selection_status": status, "selection_error": error, "reranked_docs": documents}
 
     def answer(self, query, market_context=None) -> dict[str, Any]:
         market = [{"id": str(item["id"]), "text": redact_text(item["text"])} for item in (market_context or [])]
