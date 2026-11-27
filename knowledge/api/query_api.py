@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
 from knowledge.api.market_api import router as market_router
+from knowledge.api.review_api import router as review_router
 from knowledge.core.deps import get_query_service
 from knowledge.core.paths import get_front_page_dir
 from knowledge.processor.query_processor.base import setup_logging
@@ -163,6 +164,7 @@ def create_app() -> FastAPI:
 
     register_router(app)
     app.include_router(market_router)
+    app.include_router(review_router)
     return app
 
 

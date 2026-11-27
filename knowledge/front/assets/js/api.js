@@ -147,6 +147,17 @@ export function fetchTaskStatus(taskId) {
 
 /* ---------- Query service (:8001) ---------- */
 
+export function saveReview(text, requestId) {
+    return postJSON('/reviews', {text, request_id: requestId}, {
+        timeout: 90000,
+        timeoutMessage: '等待抽取超时，文本可能已保存。可查看最近复盘，或保留输入重试。',
+    });
+}
+
+export function fetchReviews() {
+    return request('/reviews?limit=20');
+}
+
 export function submitQuery({query, sessionId, isStream}) {
     const stream = Boolean(isStream);
     // 流式只等 task_id；非流式要等整条主图跑完，两者不能共用同一个超时

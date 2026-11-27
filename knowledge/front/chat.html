@@ -48,6 +48,19 @@
 
 <main class="chat-shell" id="main">
     <div class="chat-scroll" id="scroller">
+        <details class="review-panel" id="reviewPanel">
+            <summary>交易复盘</summary>
+            <form id="reviewForm">
+                <label for="reviewText">写下交易经过、原因、教训或交易计划</label>
+                <textarea id="reviewText" rows="4" maxlength="10000" required
+                          placeholder="例如：今天以 12.5 元买入 000001，因为突破后追高。反思应该等回踩，当时很着急。"></textarea>
+                <p class="answer-note">系统会提取复盘字段，并保留脱敏后的文本供核对。</p>
+                <button class="btn btn-primary btn-sm" id="reviewSave" type="submit">保存复盘</button>
+                <button class="btn btn-ghost btn-sm" id="reviewRefresh" type="button">查看最近复盘</button>
+            </form>
+            <p id="reviewStatus" role="status" aria-live="polite"></p>
+            <div id="reviewList"></div>
+        </details>
         <div class="thread" id="thread">
             <section class="chat-intro" id="chatIntro" aria-labelledby="introTitle">
                 <div class="intro-mark" data-icon="sparkles" data-icon-size="26" aria-hidden="true"></div>
@@ -115,5 +128,6 @@
 </noscript>
 
 <script type="module" src="/front/assets/js/chat.js"></script>
+<script type="module" src="/front/assets/js/reviews.js"></script>
 </body>
 </html>

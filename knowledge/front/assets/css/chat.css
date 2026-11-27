@@ -1,5 +1,21 @@
 /* Chat page */
 
+.review-panel {
+    max-width: var(--thread);
+    margin: 0 auto var(--space-5);
+    padding: var(--space-4);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+}
+
+.review-panel summary { cursor: pointer; font-weight: var(--weight-semibold); }
+.review-panel form { display: grid; gap: var(--space-3); margin-top: var(--space-4); }
+.review-panel textarea { width: 100%; padding: var(--space-3); resize: vertical; }
+.review-panel article { padding: var(--space-3) 0; border-top: 1px solid var(--color-border); }
+.review-panel p { margin: var(--space-2) 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-panel ul { padding-left: var(--space-5); list-style: disc; }
+
 .chat-shell {
     position: relative;
     flex: 1;
