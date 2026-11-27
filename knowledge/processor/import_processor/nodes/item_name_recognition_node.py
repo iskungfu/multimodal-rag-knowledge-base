@@ -262,8 +262,8 @@ class ItemNameRecognitionNode(BaseNode):
             "sparse_vector": sparse_vector
         }
         # 4.2 调用Milvus客户端的方法插入数据
-        from knowledge.strategy.scope import require_scoped_collection
-        require_scoped_collection(milvus_client, collection_name)
+        from knowledge.strategy.scope import public_rows_for_collection
+        insert_data = public_rows_for_collection(milvus_client, collection_name, [insert_data])[0]
         milvus_client.insert(
             collection_name=collection_name,
             data=insert_data,

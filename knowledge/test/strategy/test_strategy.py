@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -75,7 +76,7 @@ def test_formats_share_split_embed_store_and_redact(setup_service, monkeypatch, 
                 directory = Path(state["file_dir"])
                 (directory / "raw.png").write_bytes(b"private-original-image")
                 path = directory / "parsed.md"
-                path.write_text(content)
+                path.write_text(content, encoding="utf-8")
                 return {**state, "md_path": str(path)}
 
             monkeypatch.setattr(PdfToMdNode, "process", parse)
@@ -102,7 +103,8 @@ def test_private_temp_names_and_cleanup_on_success(setup_service):
     directory = Path(state["file_dir"])
     assert directory.parent == Path(__import__('tempfile').gettempdir())
     assert Path(state["import_file_path"]).name == "input.md"
-    assert directory.stat().st_mode & 0o077 == 0
+    if os.name == "posix":
+        assert directory.stat().st_mode & 0o077 == 0
     second = env.service.stage(b"another strategy", "same.md")
     assert second["file_dir"] != state["file_dir"]
     env.service.run(state)
@@ -314,3 +316,90 @@ def test_labeled_filename_name_is_redacted(setup_service):
     response = setup_service.client.post("/strategies/upload", files={"file": ("姓名：王小明_策略.md", b"test")})
     result = setup_service.client.get("/strategies/" + response.json()["task_id"]).json()
     assert "王小明" not in str(result) and "王**" in result["filename"]
+
+
+def test_internal_identifiers_with_phone_digits_stay_queryable(setup_service, monkeypatch):
+    from uuid import UUID
+    identifier = UUID("abcdefab-cdef-4a13-8123-45678abcdef0")
+    monkeypatch.setattr("knowledge.service.strategy_service.uuid4", lambda: identifier)
+    env = setup_service
+    response = env.client.post("/strategies/text", json={"text": "手机号 13812345678。复盘后才交易。"})
+    assert response.json()["task_id"] == identifier.hex
+    status = env.client.get("/strategies/" + identifier.hex)
+    assert status.status_code == 200
+    assert status.json()["task_id"] == identifier.hex
+    assert status.json()["status"] == "completed"
+    assert env.collection.find_one()["_id"] == identifier.hex
+    client = Mock()
+    client.describe_collection.return_value = description()
+    client.hybrid_search.return_value = [[{"id": 1, "entity": {
+        "document_id": identifier.hex, "owner_id": identifier.hex, "content": SENSITIVE,
+    }}]]
+    result = StrategyVectors(client, "scoped").search([1.], {1: 1.}, identifier.hex)
+    assert result[0][0]["entity"]["document_id"] == identifier.hex
+    assert result[0][0]["entity"]["owner_id"] == identifier.hex
+    assert "13812345678" not in result[0][0]["entity"]["content"]
+
+
+@pytest.mark.parametrize("content", [
+    "姓名：\n王小明。持仓金额：\n523456元。买入单价 12.5元。",
+    "**姓名**：**王小明**。**持仓金额**：**523456元**。买入单价 12.5 元。",
+    "| 字段 | 内容 |\n| --- | --- |\n| 姓名 | 王小明 |\n| 持仓金额 | 523456元 |\n| 买入单价 | 12.5元 |",
+    "| **姓名** | **持仓金额** | 买入单价 |\n| --- | ---: | --- |\n| 王小明 | 523456元 | 12.5元 |",
+    "| 手机号 13812345678 | 姓名：王小明 | 持仓金额：523456元 |\n| --- | --- | --- |\n| 策略 | 复盘 | 12.5元 |",
+    "| 姓名 | 持仓金额 | 买入单价 |\n| --- | --- | --- |\n王小明 | 523456元 | 12.5元",
+    "| 姓名 | 持仓金额 | 买入单价 | 备注 |\n| --- | --- | --- | --- |\n王小明 | 523456元 | 12.5元",
+    "<table><tr><td>姓名</td><td>王小明</td></tr><tr><td>持仓金额</td><td>523456元</td></tr><tr><td>买入单价</td><td>12.5元</td></tr></table>",
+    "<table><tr><th>姓名</th><th>持仓金额</th><th>买入单价</th></tr><tr><td>王小明</td><td>523456元</td><td>12.5元</td></tr></table>",
+    "<td>姓名</td><td>王小明</td><td>持仓金额</td><td>523456元</td>买入单价12.5元。",
+    "【姓名】：王小明。 【持仓金额】：523456元。 买入单价12.5元。",
+])
+def test_markdown_labels_and_tables_redact_before_embedding_and_on_read(setup_service, content):
+    from knowledge.review.privacy import redact_text
+    env = setup_service
+    response = env.client.post("/strategies/upload", files={"file": ("test.md", content.encode("utf-8"))})
+    assert response.status_code == 202
+    assert env.client.get("/strategies/" + response.json()["task_id"]).json()["status"] == "completed"
+    stored = json.dumps(env.captured, ensure_ascii=False)
+    assert "王小明" not in stored and "523456" not in stored
+    assert "12.5" in stored
+    safe = redact_text(content)
+    assert redact_text(safe) == safe
+    assert "持仓金额" in safe
+    env.collection.insert_one({"_id": "markdown_old", "owner_id": "default_user", "doc_type": "personal", "title": content})
+    returned = env.client.get("/strategies/markdown_old").text
+    assert "王小明" not in returned and "523456" not in returned
+
+
+def test_configured_legacy_public_schema_keeps_import_and_retrieval(monkeypatch):
+    from knowledge.strategy.scope import public_rows_for_collection
+    client = Mock()
+    fields = {"id", "item_name", "title", "parent_title", "file_title", "content", "dense_vector", "sparse_vector"}
+    client.describe_collection.return_value = {
+        "fields": [{"name": name, "type": DataType.VARCHAR} for name in fields],
+        "enable_dynamic_field": False,
+    }
+    monkeypatch.setenv("CHUNKS_COLLECTION", "configured_legacy")
+    monkeypatch.delenv("LEGACY_PUBLIC_COLLECTIONS", raising=False)
+    assert retrieval_filter(client, "configured_legacy") == 'item_name != ""'
+    row = {"item_name": "test", "content": "public", "owner_id": "public", "doc_type": "knowledge", "document_id": ""}
+    assert public_rows_for_collection(client, "configured_legacy", [row]) == [{"item_name": "test", "content": "public"}]
+    with pytest.raises(IsolationError):
+        public_rows_for_collection(client, "configured_legacy", [{**row, "doc_type": "personal"}])
+    with pytest.raises(IsolationError):
+        retrieval_filter(client, "configured_legacy", "default_user", "personal")
+    with pytest.raises(IsolationError):
+        public_rows_for_collection(client, "unknown", [row])
+
+
+def test_same_pdf_can_be_extracted_twice_on_windows(tmp_path, monkeypatch):
+    node = PdfToMdNode()
+    for content in ["# first import", "# repeated import"]:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("full.md", content)
+        response = Mock()
+        response.iter_content.return_value = [buffer.getvalue()]
+        monkeypatch.setattr(node, "_request", lambda *args, **kwargs: response)
+        path = node._extract_md("unused", tmp_path, Path("same.pdf"))
+        assert Path(path).read_text(encoding="utf-8") == content

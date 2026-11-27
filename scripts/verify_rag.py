@@ -19,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--stream", action="store_true")
     parser.add_argument("--pdf", action="store_true")
+    parser.add_argument("--legacy", action="store_true")
     args = parser.parse_args()
     from dotenv import load_dotenv
 
@@ -37,7 +38,7 @@ def main():
     })
     log_dir = ROOT / ".sandcastle/logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    report = {"run_id": run_id, "format": "pdf" if args.pdf else "markdown", "stream": args.stream, "checks": {}, "cleanup": {}, "passed": False}
+    report = {"run_id": run_id, "format": "pdf" if args.pdf else "markdown", "stream": args.stream, "legacy": args.legacy, "checks": {}, "cleanup": {}, "passed": False}
     console = sys.stdout
     started = time.monotonic()
     clients = None
@@ -69,6 +70,21 @@ def main():
                 check("milvus_grpc", isinstance(milvus.list_collections(timeout=15), list))
                 check("isolated_collections", not any(milvus.has_collection(name) for name in collections))
                 check("isolated_database", run_id not in mongo.list_database_names())
+
+                if args.legacy:
+                    from pymilvus import DataType
+                    from knowledge.processor.import_processor.nodes.milvus_import_node import _MilvusIndexBuilder
+                    for name, primary, text_fields in [
+                        (collections[0], "pk", ["file_title", "item_name"]),
+                        (collections[1], "id", ["item_name", "title", "parent_title", "file_title", "content"]),
+                    ]:
+                        schema = milvus.create_schema(enable_dynamic_field=False)
+                        schema.add_field(primary, DataType.INT64, is_primary=True, auto_id=True)
+                        for field in text_fields:
+                            schema.add_field(field, DataType.VARCHAR, max_length=65535)
+                        schema.add_field("dense_vector", DataType.FLOAT_VECTOR, dim=1024)
+                        schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)
+                        milvus.create_collection(name, schema=schema, index_params=_MilvusIndexBuilder.build_index_params(milvus))
 
                 filename = run_id + (".pdf" if args.pdf else ".md")
                 content = (
@@ -124,6 +140,11 @@ def main():
                     milvus.flush(name, timeout=30)
                 rows = milvus.query(collections[1], filter="", output_fields=["content", "dense_vector", "sparse_vector"], limit=20, consistency_level="Strong")
                 check("real_vectors", bool(rows) and all(len(row["dense_vector"]) == 1024 and row["sparse_vector"] for row in rows), {"chunks": len(rows)})
+                if args.legacy:
+                    check("legacy_schema_preserved", all(
+                        not {"owner_id", "doc_type", "document_id"}.intersection(field["name"] for field in milvus.describe_collection(name)["fields"])
+                        for name in collections
+                    ))
 
                 class Observer(BaseCallbackHandler):
                     def on_chain_end(self, outputs, **kwargs):

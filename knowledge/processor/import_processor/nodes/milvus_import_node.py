@@ -123,6 +123,8 @@ class _MilvusInserter:
                chunks: List[Dict[str, Any]]) -> List[int]:
         #1. 组装要插入的数据行
         insert_rows = cls._build_rows(chunks)
+        from knowledge.strategy.scope import public_rows_for_collection
+        insert_rows = public_rows_for_collection(milvus_client, collection_name, insert_rows)
         #2. 调用Milvus客户端的方法插入数据
         insert_results = milvus_client.insert(
             collection_name=collection_name,
@@ -252,8 +254,6 @@ class MilvusImportNode(BaseNode):
             )
             self.logger.info(f"Collection:{collection_name}创建成功,稠密向量维度为{dim}")
         #4. 插入数据,并把自增主键回填到chunk中
-        from knowledge.strategy.scope import require_scoped_collection
-        require_scoped_collection(milvus_client, collection_name)
         chunk_ids = _MilvusInserter.insert(milvus_client, collection_name, validated_chunks)
         self.logger.info(f"向量入库成功,共写入{len(chunk_ids)}条数据,Collection:{collection_name}")
 

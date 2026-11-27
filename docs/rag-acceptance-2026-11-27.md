@@ -30,6 +30,7 @@
 python -m unittest discover -s knowledge/test/query -p test_rag_regressions.py
 python scripts/verify_rag.py
 python scripts/verify_rag.py --stream --pdf
+python scripts/verify_rag.py --legacy
 ```
 
 PDF 验收额外需要 `reportlab`、`pymupdf`；API 验收需要 `httpx`。配置读取 `knowledge/.env`，本地模型应已存在。详细报告保存于被 Git 忽略的 `.sandcastle/logs/rag_accept_*.json`，原始服务日志可能包含服务地址，留在本机。
@@ -42,4 +43,13 @@ Markdown/非流式复测记录：`rag_accept_cf7d1764f8d1`，导入、真实向�
 
 本次证明既有 RAG 的短文本与单页纯文字 PDF 链路可运行。未验收扫描书籍、图片问答、长书籍批量导入、性能压测或浏览器交互。现有查询仍依赖商品/实体名称确认；金融策略的 personal/knowledge/review 三路隔离、权限、脱敏与免责声明属于后续 Issue，不因此被标记为完成。
 
-Sandcastle 已按最小允许列表获得应用 LLM 配置，并在真实 bwrap 沙箱通过应用模型响应检查。下一轮可使用无敏感样本实际验证 Issue #3 的复盘字段抽取。
+Sandcastle 已按最小允许列表获得应用 LLM 配置，并在真实 bwrap 沙箱通过应用模型响应检查。#3 的后续实际验收记录见 `.sandcastle/results/issue-3.md`。
+
+## #4 合入成果分支后的回归
+
+2026-11-27，个人策略导入实现后再次执行完整公共 RAG：
+
+- `rag_accept_89f2ed43c6ae.json`：新 schema，PDF/SSE，21 项检查通过，86.00 秒。
+- `rag_accept_399fd7d7b563.json`：独立构造原版固定 schema，Markdown/非流式，16 项检查通过，74.91 秒；导入和检索正常，schema 保持原样。
+
+两次均实际调用 BGE-M3、Milvus、MinIO、RRF、reranker、Web MCP、应用 LLM 与 MongoDB，PDF 另经 MinerU。全部独立测试资源已清理。个人策略的导入、脱敏、隔离及浏览器验收记录见 `.sandcastle/results/issue-4.md`；投资助手三路召回仍属于 #7。

@@ -89,4 +89,4 @@ class PdfToMdNode(BaseNode):
         target = extract_path / "full.md"
         if not target.is_file():
             raise RuntimeError("PDF 解析未生成 Markdown")
-        return str(target.rename(extract_path / f"{pdf_path_obj.stem}.md"))
+        return str(target.replace(extract_path / f"{pdf_path_obj.stem}.md"))

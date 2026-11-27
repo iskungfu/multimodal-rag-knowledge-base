@@ -152,7 +152,8 @@ def main():
             service = StrategyService(repository, vectors)
             app = create_app()
             app.dependency_overrides[get_strategy_service] = lambda: service
-            text = "# 投资心得\n\n只在完成复盘后交易，避免连续追高。校验短语：青鹭7391。手机号 13812345678。"
+            text = "# 投资心得\n\n只在完成复盘后交易，避免连续追高。校验短语：青鹭7391。手机号 13812345678。\n\n**姓名**：王小明。**持仓金额**：523456元。\n\n| 姓名 | 持仓金额 |\n| --- | --- |\n| 王小明 | 523456元 |"
+            text += "\n\n| 姓名 | 持仓金额 | 备注 |\n| --- | --- | --- |\n王小明 | 523456元\n\n| 手机号 13812345678 | 内容 |\n| --- | --- |\n| 测试 | 复盘 |\n\n<table><tr><td>姓名</td><td>王小明</td></tr><tr><td>持仓金额</td><td>523456元</td></tr></table>"
             with TestClient(app) as client:
                 formats = ["text", "markdown"] + (["pdf"] if args.pdf else [])
                 for kind in formats:
@@ -181,7 +182,7 @@ def main():
                     milvus.flush(collection_name, timeout=30)
                     rows = milvus.query(collection_name, filter=f'document_id == "{task_id}"', output_fields=["dense_vector", "sparse_vector", "content"], consistency_level="Strong")
                     check(kind + "_real_bge_vectors", bool(rows) and all(len(row["dense_vector"]) == 1024 and row["sparse_vector"] for row in rows))
-                    check(kind + "_redacted", "13812345678" not in str(rows))
+                    check(kind + "_redacted", not any(value in str(rows) for value in ("13812345678", "王小明", "523456")))
             query_vectors = generate_bge_m3_hybrid_vectors(AIClients.get_bge_m3_client(), ["投资心得校验短语是什么？"])
             hits = vectors.search(query_vectors["dense"][0], query_vectors["sparse"][0], "default_user", limit=20)[0]
             check("host_real_recall", any("7391" in hit["entity"]["content"] for hit in hits))
