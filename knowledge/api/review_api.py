@@ -21,7 +21,9 @@ def get_review_service():
     try:
         client = MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000,
                              connectTimeoutMS=5000, socketTimeoutMS=5000, tz_aware=True)
-        return ReviewService(ReviewRepository(client[os.getenv("MONGO_DB_NAME", "kb001")]["trade_reviews"]))
+        from knowledge.review.indexing import ReviewIndexer
+        repository = ReviewRepository(client[os.getenv("MONGO_DB_NAME", "kb001")]["trade_reviews"])
+        return ReviewService(repository, indexer=ReviewIndexer(repository))
     except (KeyError, ValueError, PyMongoError):
         if client is not None:
             client.close()
@@ -50,6 +52,17 @@ def recent_reviews(limit: int = Query(20, ge=1, le=100), service: ReviewService 
 def read_review(review_id: UUID, service: ReviewService = Depends(get_review_service)):
     try:
         document = service.get(review_id)
+    except PyMongoError:
+        raise HTTPException(503, "复盘存储暂不可用") from None
+    if document is None:
+        raise HTTPException(404, "复盘不存在")
+    return document
+
+
+@router.post("/{review_id}/index")
+def index_review(review_id: UUID, service: ReviewService = Depends(get_review_service)):
+    try:
+        document = service.reindex(review_id)
     except PyMongoError:
         raise HTTPException(503, "复盘存储暂不可用") from None
     if document is None:
