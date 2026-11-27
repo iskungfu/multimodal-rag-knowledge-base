@@ -27,6 +27,7 @@ class QueryGraphState(TypedDict):
     item_names: List[str] # 商品名称
     rewritten_query: str  #重写答案
     history: list   # 历史对话
+    knowledge_query: bool # 公共投资知识查询，跳过商品名确认
     is_stream: bool # 是否流式输出
 
 

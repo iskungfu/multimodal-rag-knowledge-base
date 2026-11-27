@@ -42,15 +42,15 @@ class AIClients(BaseClientManager):
             api_key = cls._require_env("OPEN_API_KEY")
             base_url = cls._require_env("OPEN_API_BASE")
             client = OpenAI(api_key=api_key, base_url=base_url)
-            logger.info(f"OpenAI 客户端初始化成功 (base_url={base_url})")
+            logger.info("OpenAI 客户端初始化成功")
 
             return client
 
         except EnvironmentError:
             raise
         except Exception as e:
-            logger.error(f"OpenAI 客户端创建失败: {e}")
-            raise ConnectionError(f"OpenAI 连接失败: {e}") from e
+            logger.error("OpenAI 客户端创建失败")
+            raise ConnectionError("OpenAI 连接失败") from None
 
     # ── LLM ──
     @classmethod
@@ -88,7 +88,7 @@ class AIClients(BaseClientManager):
         except EnvironmentError:
             raise
         except Exception as e:
-            raise ConnectionError(f"OpenAI 连接失败: {e}") from e
+            raise ConnectionError("OpenAI 连接失败") from None
 
     # ── BGE-M3嵌入模型客户端 ──
     @classmethod

@@ -48,14 +48,14 @@ class StorageClients(BaseClientManager):
             else:
                 logger.info(f"MinIO bucket '{bucket_name}' 已存在")
 
-            logger.info(f"MinIO 客户端初始化成功 (endpoint={endpoint})")
+            logger.info("MinIO 客户端初始化成功")
             return client
 
         except EnvironmentError:
             raise
         except Exception as e:
-            logger.error(f"MinIO 客户端创建失败: {e}")
-            raise ConnectionError(f"MinIO 连接失败: {e}") from e
+            logger.error("MinIO 客户端创建失败")
+            raise ConnectionError("MinIO 连接失败") from None
 
     # ── Milvus ──
 
@@ -69,14 +69,14 @@ class StorageClients(BaseClientManager):
             uri = cls._require_env("MILVUS_URL")
 
             client = MilvusClient(uri=uri)
-            logger.info(f"Milvus 客户端初始化成功 (uri={uri})")
+            logger.info("Milvus 客户端初始化成功")
             return client
 
         except EnvironmentError:
             raise
         except Exception as e:
-            logger.error(f"Milvus 客户端创建失败: {e}")
-            raise ConnectionError(f"Milvus 连接失败: {e}") from e
+            logger.error("Milvus 客户端创建失败")
+            raise ConnectionError("Milvus 连接失败") from None
 
     # ── MongoDB ──
 
@@ -97,5 +97,5 @@ class StorageClients(BaseClientManager):
         except EnvironmentError:
             raise
         except Exception as e:
-            logger.error(f"MongoDB 客户端创建失败: {e}")
-            raise ConnectionError(f"MongoDB 连接失败: {e}") from e
+            logger.error("MongoDB 客户端创建失败")
+            raise ConnectionError("MongoDB 连接失败") from None

@@ -6,52 +6,17 @@ from knowledge.processor.query_processor.base import BaseNode
 from knowledge.processor.query_processor.state import QueryGraphState
 from knowledge.prompts.query_prompt import ANSWER_PROMPT
 from knowledge.utils.clients.ai_clients import AIClients
-from knowledge.utils.mongo_history_util import save_chat_message, get_recent_messages
-from knowledge.utils.sse_util import push_sse_event, SSEEvent
-from knowledge.utils.task_util import set_task_result
 
 
 class AnswerOutputNode(BaseNode):
     name = "answer_output_node"
 
     def process(self, state: QueryGraphState) -> QueryGraphState:
-        # 1. 获取用户的问题(重写后的问题)
-        user_query = state.get("rewritten_query")
-        # 获取task_id
-        task_id = state.get("task_id")
-        # 2. 获取answer
-        answer = state.get("answer")
-        # 3. 获取是否要进行流式输出
-        is_stream = state.get("is_stream")
-        # 4. 判断是否有answer
-        if answer:
-            # 4.1 表示在答案输出节点执行之前，就已经生成了答案，那么就应该将已有答案进行输出
-            self._push_exist_answer(answer, is_stream, task_id)
-        else:
-            # 4.1 表示在答案输出节点执行之前，没有生成答案，那么就需要在答案输出节点中调用大模型来生成答案
-            # 4.1.1 组装提示词
+        if not state.get("answer"):
             prompt = self._build_answer_prompt(state, self.config.max_context_chars)
-            # print(prompt)
-            # 4.1.2 调用大模型生成答案
-            llm_answer = self._generate_answer(prompt, state)
-            state["answer"] = llm_answer
-            # 4.1.3 流式输出完之后，最终要告诉前端 SSE通道关闭了
-            if is_stream:
-                push_sse_event(task_id=task_id, event=SSEEvent.FINAL, data={"answer": llm_answer})
-
-
-        # 5. 保存历史会话信息到MongoDB中
-        self._save_history(state)
-
+            state["answer"] = self._generate_answer(prompt, state)
+        # QueryService 在整个图结束后统一脱敏、持久化并发布终稿。
         return state
-
-    # 输出已有答案
-    def _push_exist_answer(self, answer: str, is_stream: bool, task_id: str):
-        set_task_result(task_id=task_id, key="answer", value=answer)
-        # 1. 判断到底是流式输出还是非流式输出
-        if is_stream:
-            # 1.1 流式输出,使用SSE队列
-            push_sse_event(task_id=task_id, event=SSEEvent.FINAL, data={"answer": answer})
 
     # 构建答案生成的上下文prompt
     def _build_answer_prompt(self, state: QueryGraphState, max_context_chars: int) -> str:
@@ -182,18 +147,17 @@ class AnswerOutputNode(BaseNode):
         try:
             llm_client = AIClients.get_llm_client(response_format=False)
         except Exception as e:
-            self.logger.error(f"创建大模型对象失败,{e}")
+            self.logger.error("创建大模型对象失败")
             return "LLM暂无任何内容输出"
 
         llm_result = ""
         # 2. 判断是流式输出还是非流式输出
         if state.get("is_stream"):
-            # 2.1 如果是流式输出,则需要边生成边推送SSE事件
+            # 2.1 接收模型流，完整缓冲后交由服务层统一发布
             llm_result = self._llm_stream(prompt, llm_client, state)
         else:
             # 2.2 如果是非流式输出,则直接调用大模型的生成接口,获取完整答案后进行输出
             llm_result = self._llm_invoke(prompt, llm_client)
-        set_task_result(task_id=state.get("task_id"), key="answer", value=llm_result)
         return llm_result
 
     # 大模型非流式执行
@@ -202,7 +166,7 @@ class AnswerOutputNode(BaseNode):
         try:
             llm_res = llm_client.invoke(prompt)
         except Exception as e:
-            self.logger.error(f"调用大模型失败,{e}")
+            self.logger.error("调用大模型失败")
             return "LLM暂无任何内容输出"
         # 2. 获取大模型输出的内容
         llm_content = llm_res.content
@@ -215,33 +179,12 @@ class AnswerOutputNode(BaseNode):
         final_answer = ""
         # 1. 流式调用大模型
         for chunk in llm_client.stream(prompt):
-            # 1.1 每得到一个内容块，就将其推送到SSE队列中
+            # 1.1 收集内容块，不在此处向客户端发送原始文本
             content = getattr(chunk, "content", "")
-            if content:
-                push_sse_event(task_id=state.get("task_id"), event=SSEEvent.DELTA, data={"answer": content})
-
-            # 1.2 将每个chunk的内容拼接到最终的答案返回出来
-            final_answer += content
+            # 完整缓冲，避免手机号、姓名或表格跨 chunk 绕过脱敏。
+            if isinstance(content, str):
+                final_answer += content
         return final_answer
-
-    def _save_history(self, state: QueryGraphState):
-        # 1. 保存用户的对话内容
-        save_chat_message(
-            session_id=state.get("session_id"),
-            role="user",
-            text=state.get("original_query"),
-            rewritten_query=state.get("rewritten_query"),
-            item_names=state.get("item_names")
-        )
-
-        # 2. 保存AI的对话内容
-        save_chat_message(
-            session_id=state.get("session_id"),
-            role="assistant",
-            text=state.get("answer"),
-            item_names=state.get("item_names")
-        )
-
 
 if __name__ == '__main__':
     print("=" * 60)

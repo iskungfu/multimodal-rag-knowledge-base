@@ -6,7 +6,7 @@ from knowledge.review.extraction import ExtractionUnavailable, ReviewExtractor
 from knowledge.review.privacy import redact_text, redact_value
 
 DEFAULT_OWNER = "default_user"
-DISCLAIMER = "以上信息不构成投资建议，投资有风险，入市需谨慎。"
+from knowledge.utils.answer_policy import DISCLAIMER
 
 
 def present(document):

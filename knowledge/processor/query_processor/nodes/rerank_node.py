@@ -93,7 +93,7 @@ class RerankNode(BaseNode):
         try:
             rerank_client = AIClients.get_bge_m3_rerank_client()
         except Exception as e:
-            self.logger.warning(f"获取Rerank模型对象失败,{e}")
+            self.logger.warning("获取Rerank模型对象失败")
             return [{**doc, "score": None} for doc in final_docs]
         # 3. 调用模型进行得分计算
         try:
@@ -105,7 +105,7 @@ class RerankNode(BaseNode):
 
             return [{**doc, "score": self._sigmoid(score)} for doc, score in zip(final_docs, scores)]
         except Exception as e:
-            self.logger.warning(f"调用Rerank模型计算相关性得分失败,{e}")
+            self.logger.warning("调用Rerank模型计算相关性得分失败")
             return [{**doc, "score": None} for doc in final_docs]
 
     def _cliff_cutoff(self, sorted_doc_score: List[Dict[str, Any]], rerank_min_top_k: int, rerank_max_top_k: int, rerank_gap_abs: float) -> List[Dict[str, Any]]:

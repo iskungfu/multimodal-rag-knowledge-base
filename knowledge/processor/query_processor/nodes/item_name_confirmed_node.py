@@ -58,7 +58,7 @@ class _ItemNameAligner:
         try:
             embedding_client = AIClients.get_bge_m3_client()
         except Exception as e:
-            self._logger.error(f"获取嵌入模型失败,{e}")
+            self._logger.error("获取嵌入模型失败")
             return final_search_result
 
         # 2. 对item_names进行向量化
@@ -67,14 +67,14 @@ class _ItemNameAligner:
             dense_vector_list = embedding_result.get("dense")
             sparse_vector_list = embedding_result.get("sparse")
         except Exception as e:
-            self._logger.error(f"向量嵌入失败,{e}")
+            self._logger.error("向量嵌入失败")
             return final_search_result
 
         # 创建milvus_client对象
         try:
             milvus_client = StorageClients.get_milvus_client()
         except Exception as e:
-            self._logger.error(f"获取milvus客户端失败,{e}")
+            self._logger.error("获取milvus客户端失败")
             return final_search_result
 
         # 3. 创建混合检索请求
@@ -230,7 +230,7 @@ class _ItemNameExtractor:
         try:
             llm_client = AIClients.get_llm_client(response_format=True)
         except Exception as e:
-            self._logger.error(f"创建大模型对象失败,{e}")
+            self._logger.error("创建大模型对象失败")
             return default_result
         # 2. 组装prompt消息
         system_message = SystemMessage(content=ITEM_NAME_SYSTEM_EXTRACT_TEMPLATE)
@@ -244,7 +244,7 @@ class _ItemNameExtractor:
         try:
             llm_response = llm_client.invoke([system_message, human_message])
         except Exception as e:
-            self._logger.error(f"调用大模型对象失败,{e}")
+            self._logger.error("调用大模型对象失败")
             return default_result
         # 4. 清洗结果
         llm_content = llm_response.content
@@ -319,6 +319,11 @@ class ItemNameConfirmedNode(BaseNode):
             state:
         Returns:
         """
+        if state.get("knowledge_query"):
+            state["rewritten_query"] = state["original_query"]
+            state["item_names"] = []
+            state["history"] = get_recent_messages(state.get("session_id", ""))
+            return state
         # 1. 获取用户原始问题
         original_query = state["original_query"]
         # TODO 2. 获取历史对话(mongodb)

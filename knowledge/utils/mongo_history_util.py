@@ -26,6 +26,8 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
 from knowledge.utils.clients.storage_clients import StorageClients
+from knowledge.review.privacy import redact_text, redact_value
+from knowledge.utils.answer_policy import finalize_answer
 
 load_dotenv()
 
@@ -57,9 +59,9 @@ def save_chat_message(
     document = {
         "session_id": session_id,
         "role": role,
-        "text": text,
-        "rewritten_query": rewritten_query or "",
-        "item_names": item_names or [],
+        "text": finalize_answer(text) if role == "assistant" else redact_text(text),
+        "rewritten_query": redact_text(rewritten_query or ""),
+        "item_names": redact_value(item_names or []),
         "message_id": message_id,
         "ts": time.time(),
     }
@@ -69,7 +71,7 @@ def save_chat_message(
         return str(result.inserted_id)
     except Exception as e:
         # 历史保存失败不应该影响主流程
-        logger.error(f"保存聊天历史失败(session_id={session_id}): {e}")
+        logger.error("保存聊天历史失败")
         return ""
 
 
@@ -92,9 +94,13 @@ def get_recent_messages(session_id: str, limit: int = 10) -> List[Dict[str, Any]
         for msg in messages:
             msg.pop("_id", None)
 
+        for msg in messages:
+            msg["text"] = finalize_answer(msg.get("text", "")) if msg.get("role") == "assistant" else redact_text(msg.get("text", ""))
+            msg["rewritten_query"] = redact_text(msg.get("rewritten_query") or "")
+            msg["item_names"] = redact_value(msg.get("item_names") or [])
         return messages
     except Exception as e:
-        logger.error(f"读取聊天历史失败(session_id={session_id}): {e}")
+        logger.error("读取聊天历史失败")
         return []
 
 
@@ -107,5 +113,5 @@ def clear_history(session_id: str) -> int:
         result = _get_collection().delete_many({"session_id": session_id})
         return result.deleted_count
     except Exception as e:
-        logger.error(f"清空聊天历史失败(session_id={session_id}): {e}")
+        logger.error("清空聊天历史失败")
         return 0

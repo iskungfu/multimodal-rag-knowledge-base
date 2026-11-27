@@ -565,20 +565,20 @@ function parseAnswerAndImages(text) {
     const before = raw.slice(0, lastMatch.index).trimEnd();
     const after = raw.slice(lastMatch.index + lastMatch[0].length);
     const urls = [];
+    const trailingText = [];
 
     after.split(/\r?\n/).forEach((line) => {
         const value = line.trim();
         if (!value) return;
-        if (/^https?:\/\//i.test(value)) {
-            urls.push(value);
-        } else {
-            const found = value.match(/https?:\/\/[^\s<>"'）】。，；]+/gi) || [];
-            urls.push(...found);
-        }
+        const found = (value.match(/https?:\/\/[^\s<>"'）】。，；]+/gi) || []).filter(isImageUrl);
+        urls.push(...found);
+        // 图片区块后仍可能有服务端附加的免责声明，不能丢弃正文。
+        const remaining = found.reduce((content, url) => content.replace(url, ''), line).trim();
+        if (remaining) trailingText.push(remaining);
     });
 
     return {
-        text: before,
+        text: [before, trailingText.join('\n')].filter(Boolean).join('\n\n'),
         images: dedupe(urls).filter(isImageUrl),
     };
 }

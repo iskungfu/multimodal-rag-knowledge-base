@@ -148,6 +148,8 @@ def execute_hybrid_search_query(milvus_client: MilvusClient,
 
 
 def _item_names_filter(item_names: List[str]) -> Tuple[str, Dict[str, Any]]:
+    if not item_names:
+        return "", {}
     expr = "item_name in {item_names}"
     expr_params = {"item_names": item_names}
     return expr, expr_params

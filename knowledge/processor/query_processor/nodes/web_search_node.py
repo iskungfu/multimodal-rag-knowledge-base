@@ -11,6 +11,8 @@ class WebSearchNode(BaseNode):
     name = "web_search_node"
 
     def process(self, state: QueryGraphState) -> Dict[str, Any]:
+        if state.get("knowledge_query"):
+            return {"web_search_docs": []}
         # 0. 校验MCP鉴权配置(Key缺失时请求会直接返回401，提前给出明确错误)
         if not self.config.mcp_dashscope_api_key:
             message = "MCP鉴权Key缺失,请在 knowledge/.env 中配置 MCP_DASHSCOPE_API_KEY(阿里云百炼API Key)"
@@ -77,7 +79,7 @@ class WebSearchNode(BaseNode):
             self.logger.error(f"rewritten_query不能为空以及类型必须是str")
             raise StateFieldError(node_name=self.name, field_name="rewritten_query", expected_type=str)
 
-        if not item_names or not isinstance(item_names, list):
+        if not isinstance(item_names, list) or (not item_names and not state.get("knowledge_query")):
             self.logger.error("item_names不能为空以及类型必须是list")
             raise StateFieldError(node_name=self.name, field_name="item_names", expected_type=list)
 

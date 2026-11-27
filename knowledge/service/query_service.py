@@ -8,7 +8,11 @@ import uuid
 from typing import Any, Dict, List
 
 from knowledge.processor.query_processor.main_graph import query_app
-from knowledge.utils.mongo_history_util import clear_history, get_recent_messages
+from knowledge.utils.mongo_history_util import clear_history, get_recent_messages, save_chat_message
+from knowledge.review.privacy import redact_text, redact_value
+from knowledge.utils.answer_policy import finalize_answer
+from knowledge.risk.symbols import SymbolResolver
+from knowledge.service.risk_service import RiskService
 from knowledge.utils.sse_util import push_sse_event, SSEEvent
 from knowledge.utils.task_util import (
     TASK_STATUS_COMPLETED,
@@ -25,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 class QueryService:
     """查询业务服务"""
+
+    def __init__(self, resolver=None, risk=None, graph=None):
+        self.resolver = resolver or SymbolResolver()
+        self.risk = risk or RiskService()
+        self.graph = graph
 
     # ── ID 生成 ──
 
@@ -49,37 +58,53 @@ class QueryService:
         """
         update_task_status(task_id, TASK_STATUS_PROCESSING)
 
+        safe_query = redact_text(user_query)
+        state = {"original_query": safe_query, "session_id": session_id,
+                 "task_id": task_id, "is_stream": is_stream}
+        error = ""
         try:
-            initial_state = {
-                "original_query": user_query,
-                "session_id": session_id,
-                "task_id": task_id,
-                "is_stream": is_stream,
-            }
+            resolution = self.resolver.resolve(safe_query)
+            if resolution.security:
+                answer = self.risk.answer(resolution.security)
+            elif resolution.message:
+                answer = resolution.message
+            else:
+                state["knowledge_query"] = resolution.knowledge
+                state = (self.graph or query_app).invoke(state)
+                answer = state.get("answer") or "未找到可用的回答，请补充问题后重试。"
+        except Exception:
+            # 不记录异常原文或 traceback，连接异常可能带有 URL/凭据。
+            logger.error("查询流程执行失败")
+            error = "查询流程执行失败，请稍后重试。"
+            answer = error
 
-            # 执行 LangGraph 查询流程
-            query_app.invoke(initial_state)
-
-            update_task_status(task_id, TASK_STATUS_COMPLETED)
-
-        except Exception as e:
-            logger.error(f"查询流程执行失败(task_id={task_id}): {e}", exc_info=True)
-            message = "查询流程执行失败，请稍后重试。"
-            set_task_result(task_id, "error", message)
-            update_task_status(task_id, TASK_STATUS_FAILED)
-            if is_stream:
-                push_sse_event(task_id, SSEEvent.FINAL, {"error": message})
+        answer = finalize_answer(answer)
+        user_saved = save_chat_message(session_id, "user", safe_query,
+                          rewritten_query=state.get("rewritten_query", ""),
+                          item_names=state.get("item_names", []))
+        saved = save_chat_message(session_id, "assistant", answer,
+                                  item_names=state.get("item_names", []))
+        if not saved or not user_saved:
+            error = error or "回答已生成，但会话历史保存失败，请稍后重试。"
+        set_task_result(task_id, "answer", answer)
+        set_task_result(task_id, "error", error)
+        update_task_status(task_id, TASK_STATUS_FAILED if error else TASK_STATUS_COMPLETED)
+        if is_stream:
+            # 一次发布完整、安全的 delta，final 为同一终稿，之后不再发 progress。
+            push_sse_event(task_id, SSEEvent.DELTA, {"answer": answer})
+            push_sse_event(task_id, SSEEvent.FINAL, {"answer": answer, "error": error})
 
     # ── 结果读取 ──
 
     def get_answer(self, task_id: str) -> str:
         """获取任务生成的答案（未完成时返回空字符串）"""
-        return get_task_result(task_id, "answer", "")
+        answer = get_task_result(task_id, "answer", "")
+        return finalize_answer(answer) if answer else ""
 
     def get_status(self, task_id: str) -> Dict[str, Any]:
         """获取任务状态 + 结果（供 /status 与 /query 非流式响应使用）"""
         task_info = get_task_info(task_id)
-        task_info["answer"] = get_task_result(task_id, "answer", "")
+        task_info["answer"] = self.get_answer(task_id)
         task_info["error"] = get_task_result(task_id, "error", "")
         return task_info
 
@@ -93,9 +118,9 @@ class QueryService:
             {
                 "session_id": record.get("session_id", ""),
                 "role": record.get("role", ""),
-                "text": record.get("text", ""),
-                "rewritten_query": record.get("rewritten_query", ""),
-                "item_names": record.get("item_names", []),
+                "text": finalize_answer(record.get("text", "")) if record.get("role") == "assistant" else redact_text(record.get("text", "")),
+                "rewritten_query": redact_text(record.get("rewritten_query", "")),
+                "item_names": redact_value(record.get("item_names", [])),
                 "ts": record.get("ts"),
             }
             for record in records

@@ -28,16 +28,20 @@ class RetrievalRegressionTests(unittest.TestCase):
 
 class StreamRegressionTests(unittest.TestCase):
     def test_generated_stream_answer_is_available_to_polling(self):
-        from knowledge.processor.query_processor.nodes.answer_output_node import AnswerOutputNode
-        from knowledge.utils.task_util import get_task_result
+        from knowledge.service.query_service import QueryService
+        from knowledge.risk.symbols import Resolution
+        from knowledge.utils.answer_policy import finalize_answer
+        from unittest.mock import Mock
 
         task_id = uuid.uuid4().hex
-        node = AnswerOutputNode()
-        with patch.object(node, "_llm_stream", return_value="完整答案"), patch(
-            "knowledge.processor.query_processor.nodes.answer_output_node.AIClients.get_llm_client"
-        ):
-            node._generate_answer("测试", {"task_id": task_id, "is_stream": True})
-        self.assertEqual(get_task_result(task_id, "answer"), "完整答案")
+        graph = Mock()
+        graph.invoke.return_value = {"answer": "完整答案"}
+        resolver = Mock()
+        resolver.resolve.return_value = Resolution()
+        service = QueryService(resolver=resolver, graph=graph)
+        with patch("knowledge.service.query_service.save_chat_message", return_value="test-id"):
+            service.run_query_graph(task_id, "test", "问题", True)
+        self.assertEqual(service.get_status(task_id)["answer"], finalize_answer("完整答案"))
 
     def test_final_event_closes_http_stream_and_cleans_queue(self):
         from fastapi import FastAPI
@@ -70,7 +74,10 @@ class StreamRegressionTests(unittest.TestCase):
         for streaming in (False, True):
             task_id = uuid.uuid4().hex
             events = create_sse_queue(task_id)
-            with patch("knowledge.service.query_service.query_app") as graph, patch("knowledge.service.query_service.logger"):
+            from knowledge.risk.symbols import Resolution
+            with patch("knowledge.service.query_service.query_app") as graph, patch("knowledge.service.query_service.logger"), patch(
+                "knowledge.service.query_service.save_chat_message", return_value="test-id"
+            ), patch("knowledge.service.query_service.SymbolResolver.resolve", return_value=Resolution()):
                 graph.invoke.side_effect = RuntimeError("private-url-and-token")
                 QueryService().run_query_graph(task_id, "test", "问题", streaming)
             status = QueryService().get_status(task_id)
@@ -78,8 +85,11 @@ class StreamRegressionTests(unittest.TestCase):
             self.assertTrue(status["error"])
             self.assertNotIn("private", status["error"])
             if streaming:
+                delta = events.get_nowait()
+                self.assertEqual(delta["event"], "delta")
                 event = events.get_nowait()
                 self.assertEqual(event["event"], "final")
+                self.assertEqual(delta["data"]["answer"], event["data"]["answer"])
                 self.assertEqual(event["data"]["error"], status["error"])
             remove_sse_queue(task_id)
 

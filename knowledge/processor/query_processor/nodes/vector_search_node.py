@@ -28,13 +28,13 @@ class VectorSearchNode(BaseNode):
         try:
             embedding_client = AIClients.get_bge_m3_client()
         except Exception as e:
-            self.logger.error(f"获取嵌入模型对象失败,{e}")
+            self.logger.error("获取嵌入模型对象失败")
             raise EmbeddingError(node_name=self.name, message=f"获取嵌入模型对象失败,{e}")
 
         try:
             milvus_client = StorageClients.get_milvus_client()
         except Exception as e:
-            self.logger.error(f"获取milvus客户端对象失败,{e}")
+            self.logger.error("获取milvus客户端对象失败")
             raise MilvusError(node_name=self.name, message=f"获取milvus客户端对象失败,{e}")
         # 3. 将用户的查询进行向量化
         embedding_result = generate_bge_m3_hybrid_vectors(embedding_client, [rewritten_query])
@@ -68,7 +68,7 @@ class VectorSearchNode(BaseNode):
             self.logger.error(f"rewritten_query不能为空以及类型必须是str")
             raise StateFieldError(node_name=self.name, field_name="rewritten_query", expected_type=str)
 
-        if not item_names or not isinstance(item_names, list):
+        if not isinstance(item_names, list) or (not item_names and not state.get("knowledge_query")):
             self.logger.error("item_names不能为空以及类型必须是list")
             raise StateFieldError(node_name=self.name, field_name="item_names", expected_type=list)
 

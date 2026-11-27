@@ -88,7 +88,7 @@ class BaseNode(ABC):
             self.logger.info(f"--- {self.name} 完成 ---")
             return result
         except Exception as e:
-            self.logger.error(f"{self.name} 执行失败: {e}")
+            self.logger.error(f"{self.name} 执行失败")
             raise QueryProcessError(
                 message=str(e),
                 node_name=self.name,
