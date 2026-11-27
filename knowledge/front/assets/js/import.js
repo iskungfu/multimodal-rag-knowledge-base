@@ -4,6 +4,8 @@ import {
     checkImportHealth,
     fetchTaskStatus,
     uploadDocument,
+    importStrategyText,
+    fetchStrategies,
 } from './api.js';
 import {
     errorMessage,
@@ -164,14 +166,17 @@ function addFiles(fileList) {
     }
 }
 
-function createTask(file) {
+function createTask(file, strategy = document.getElementById('importKind').value === 'personal') {
     const isPdf = /\.pdf$/i.test(file.name);
-    const flow = isPdf ? FLOW_PDF : FLOW_COMMON;
+    const flow = strategy
+        ? ['上传文件', '检查文件', ...(isPdf ? ['PDF转Markdown'] : []), '策略脱敏', '文档切分', '向量生成', '导入向量数据库']
+        : (isPdf ? FLOW_PDF : FLOW_COMMON);
     const uid = `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
     const task = {
         id: uid,
         file,
+        strategy,
         name: file.name,
         size: file.size,
         isPdf,
@@ -381,7 +386,7 @@ function renderTask(task) {
     task.errorBox.hidden = !task.error;
     task.errorText.textContent = task.error || '';
 
-    task.chatLink.hidden = task.status !== 'completed';
+    task.chatLink.hidden = task.status !== 'completed' || task.strategy;
     task.retryBtn.hidden = task.status !== 'failed';
 
     const totalDuration = Object.values(task.durations).reduce(
@@ -422,7 +427,9 @@ async function startUpload(task) {
     renderTask(task);
 
     try {
-        const result = await uploadDocument(task.file);
+        const result = task.textInput
+            ? await importStrategyText(task.textInput.title, task.textInput.text)
+            : await uploadDocument(task.file, task.strategy);
         if (task.stopped || !task.el.isConnected) return;
         if (!result || !result.task_id) {
             throw new Error('服务未返回任务 ID');
@@ -448,7 +455,7 @@ async function pollTask(task) {
     if (task.stopped) return;
 
     try {
-        const data = await fetchTaskStatus(task.taskId);
+        const data = await fetchTaskStatus(task.taskId, task.strategy);
         if (task.stopped || !task.el.isConnected) return;
         task.consecutiveErrors = 0;
         applyStatus(task, data || {});
@@ -490,6 +497,7 @@ function applyStatus(task, data) {
         toast(`「${task.name}」已完成导入`, {type: 'success'});
         renderTask(task);
         collapseStepsLater(task);
+        if (task.strategy) refreshStrategies();
         return;
     }
 
@@ -497,7 +505,7 @@ function applyStatus(task, data) {
         task.status = 'failed';
         task.running = [];
         task.stopped = true;
-        task.error = '工作流执行失败，请检查后端日志后重试';
+        task.error = data.error || '工作流执行失败，请检查后端日志后重试';
         renderTask(task);
         return;
     }
@@ -565,3 +573,31 @@ refreshHealth();
 setInterval(refreshHealth, 30000);
 
 updateQueueState();
+
+document.getElementById('strategyTextForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const title = document.getElementById('strategyTitle').value.trim();
+    const text = document.getElementById('strategyText').value.trim();
+    if (!title || !text) return;
+    const task = createTask(new File([text], `${title}.md`, {type: 'text/markdown'}), true);
+    task.textInput = {title, text};
+    tasks.unshift(task);
+    taskList.prepend(task.el);
+    updateQueueState();
+    startUpload(task);
+});
+
+async function refreshStrategies() {
+    const status = document.getElementById('strategyListStatus');
+    try {
+        const result = await fetchStrategies();
+        document.getElementById('strategyList').replaceChildren(...result.items.map((item) =>
+            h('li', {text: `${item.title} · ${STATUS_META[item.status]?.label || item.status}${item.error ? ` · ${item.error}` : ''}`})
+        ));
+        status.textContent = result.items.length ? '' : '还没有保存个人策略';
+    } catch (error) {
+        status.textContent = errorMessage(error);
+    }
+}
+document.getElementById('refreshStrategies').addEventListener('click', refreshStrategies);
+refreshStrategies();

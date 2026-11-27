@@ -28,6 +28,7 @@ _NODE_NAME_TO_CN: Dict[str, str] = {
     "pdf_to_md_node": "PDF转Markdown",
     "md_image_node": "Markdown图片处理",
     "document_split_node": "文档切分",
+    "strategy_privacy_node": "策略脱敏",
     "item_name_recognition_node": "主体名称识别",
     "bge_embedding_chunks_node": "向量生成",
     "milvus_import_node": "导入向量数据库",

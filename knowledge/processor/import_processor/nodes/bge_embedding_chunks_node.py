@@ -17,12 +17,14 @@
     3. 回填state: 用向量化后的chunks覆盖state["chunks"],供下游Milvus入库节点使用
     4. 备份: 把带向量的chunks备份成chunks_vector.json,便于后续节点单独测试(备份失败只告警,不影响主流程)
 """
+from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TYPE_CHECKING
 
-from pymilvus.model.hybrid import BGEM3EmbeddingFunction
+if TYPE_CHECKING:
+    from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 
 from knowledge.processor.import_processor.base import BaseNode
 from knowledge.processor.import_processor.exceptions import (
@@ -48,7 +50,8 @@ class BgeEmbeddingChunksNode(BaseNode):
         #3. 将向量化后的chunks回填到state中
         state["chunks"] = final_chunks
         #4. 备份带向量的chunks,便于后续节点单独测试
-        self._backup_chunks(final_chunks, state)
+        if not state.get("owner_id"):
+            self._backup_chunks(final_chunks, state)
 
         return state
 

@@ -1,5 +1,8 @@
-from typing import  List
-from pymilvus.model.hybrid import BGEM3EmbeddingFunction
+from __future__ import annotations
+from typing import List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 
 
 def generate_bge_m3_hybrid_vectors(model: BGEM3EmbeddingFunction, embedding_documents: List[str]):

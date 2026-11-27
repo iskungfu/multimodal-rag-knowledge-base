@@ -83,7 +83,9 @@ def execute_hybrid_search_query(milvus_client: MilvusClient,
                                 norm_score=True,
                                 limit=5,
                                 output_fields=None,
-                                search_params=None):
+                                search_params=None,
+                                owner_id=None,
+                                doc_type="knowledge"):
     """
     执行混合搜索
 
@@ -105,6 +107,15 @@ def execute_hybrid_search_query(milvus_client: MilvusClient,
         raise ValueError("search_requests 不能为 None 或空列表")
 
     try:
+        from knowledge.strategy.scope import retrieval_filter
+        from knowledge.review.privacy import redact_value
+        scope = retrieval_filter(milvus_client, collection_name, owner_id, doc_type)
+        search_requests = [AnnSearchRequest(
+            data=request.data, anns_field=request.anns_field, param=request.param,
+            limit=request.limit,
+            expr=f"({scope}) and ({request.expr})" if request.expr else scope,
+            expr_params=request.expr_params,
+        ) for request in search_requests]
         # 创建权重融合排序器
         rerank = WeightedRanker(ranker_weights[0], ranker_weights[1], norm_score=norm_score)
 
@@ -119,15 +130,21 @@ def execute_hybrid_search_query(milvus_client: MilvusClient,
             ranker=rerank,
             limit=limit,
             output_fields=output_fields,
-            search_params=search_params
+            search_params=search_params,
+            timeout=15,
+            consistency_level="Strong",
         )
 
         # 动态计算所有查询返回的结果总数
         total_hits = sum(len(hits) for hits in res) if res else 0
         logger.info(f"Milvus 混合搜索完成，共处理 {len(res) if res else 0} 个查询，总计找到 {total_hits} 个结果")
-        return res
+        # Hit/HybridHits 为 Mapping/list-like；转成普通容器再执行返回端脱敏。
+        return [[redact_value(dict(hit)) for hit in hits] for hits in res]
     except Exception as e:
-        raise RuntimeError(f"执行Milvus混合搜索失败 (collection={collection_name}): {e}") from e
+        from knowledge.strategy.scope import IsolationError
+        if isinstance(e, IsolationError):
+            raise
+        raise RuntimeError("Milvus 混合搜索失败，请检查存储服务") from None
 
 
 def _item_names_filter(item_names: List[str]) -> Tuple[str, Dict[str, Any]]:

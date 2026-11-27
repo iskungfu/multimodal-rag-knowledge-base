@@ -43,13 +43,18 @@
 
 <main id="main" class="page">
     <div class="page-heading">
-        <h1>导入知识文档</h1>
-        <p>上传产品手册或维修指南，系统会自动完成解析、图片理解、文档切分与向量入库，随后即可在智能问答中检索。</p>
+        <h1>导入文档与个人策略</h1>
+        <p>选择个人策略后，可上传投资心得或直接写下策略，保存到当前用户的策略库。</p>
     </div>
 
     <div class="import-layout">
         <section class="card upload-card" aria-labelledby="uploadTitle">
             <h2 id="uploadTitle" class="sr-only">上传文档</h2>
+            <label for="importKind">文档用途</label>
+            <select id="importKind">
+                <option value="personal">个人策略（仅当前用户）</option>
+                <option value="knowledge">通用知识文档</option>
+            </select>
 
             <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-describedby="uploadHint">
                 <span class="dropzone-icon" data-icon="upload" data-icon-size="24" aria-hidden="true"></span>
@@ -68,10 +73,19 @@
                     multiple>
 
             <ul class="upload-rules">
-                <li>PDF 会先转换为 Markdown，再解析其中的图片内容</li>
+                <li>个人策略正文会脱敏；图片不进入策略库</li>
+                <li>PDF 原件会发送给解析服务，任务结束后清理本地临时文件</li>
                 <li>任务在服务端后台执行，可同时上传多个文件</li>
-                <li>导入完成后，可前往智能问答检索新文档</li>
+                <li>个人策略问答将在投资助手功能中接入</li>
             </ul>
+            <form id="strategyTextForm" class="strategy-form">
+                <h2>直接写下个人策略</h2>
+                <label for="strategyTitle">标题</label>
+                <input id="strategyTitle" value="个人策略" maxlength="200" required>
+                <label for="strategyText">策略正文</label>
+                <textarea id="strategyText" rows="7" maxlength="200000" required placeholder="例如：只在完成复盘后考虑新的交易，避免连续追高。"></textarea>
+                <button class="btn btn-primary" type="submit">保存个人策略</button>
+            </form>
         </section>
 
         <section class="queue" aria-labelledby="queueTitle">
@@ -95,6 +109,12 @@
             </div>
         </section>
     </div>
+    <section class="card strategy-recent" aria-labelledby="strategyRecentTitle">
+        <h2 id="strategyRecentTitle">最近的个人策略</h2>
+        <button class="btn btn-ghost btn-sm" id="refreshStrategies" type="button">刷新列表</button>
+        <p id="strategyListStatus" role="status"></p>
+        <ul id="strategyList"></ul>
+    </section>
 </main>
 
 <script type="module" src="/front/assets/js/import.js"></script>

@@ -33,6 +33,7 @@ from knowledge.schema.query_schema import (
 )
 from knowledge.service.query_service import QueryService
 from knowledge.utils.sse_util import create_sse_queue, sse_generator
+from knowledge.utils.task_util import get_task_result
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,8 @@ def register_router(app: FastAPI) -> None:
             service: QueryService = Depends(get_query_service),
     ):
         """查询任务状态（轮询备用，前端当前主要走 SSE）"""
+        if get_task_result(task_id, "private"):
+            raise HTTPException(404, "任务不存在")
         return QueryStatusResponse(**service.get_status(task_id))
 
     @app.get("/history/{session_id}", response_model=HistoryResponse)

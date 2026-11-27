@@ -131,18 +131,26 @@ export function checkImportHealth() {
     return request('/hello', {timeout: 5000});
 }
 
-export function uploadDocument(file) {
+export function uploadDocument(file, strategy = false) {
     const form = new FormData();
     form.append('file', file, file.name);
-    return request('/upload', {
+    return request(strategy ? '/strategies/upload' : '/upload', {
         method: 'POST',
         body: form,
         timeout: 120000,
     });
 }
 
-export function fetchTaskStatus(taskId) {
-    return request(`/status/${encodeURIComponent(taskId)}`, {timeout: 15000});
+export function fetchTaskStatus(taskId, strategy = false) {
+    return request(`${strategy ? '/strategies' : '/status'}/${encodeURIComponent(taskId)}`, {timeout: 15000});
+}
+
+export function importStrategyText(title, text) {
+    return postJSON('/strategies/text', {title, text});
+}
+
+export function fetchStrategies() {
+    return request('/strategies');
 }
 
 /* ---------- Query service (:8001) ---------- */

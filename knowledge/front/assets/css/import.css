@@ -432,3 +432,11 @@
         flex: 1;
     }
 }
+/* 个人策略输入复用现有页面组件。 */
+.strategy-form { display: grid; gap: 10px; margin-top: 24px; }
+.strategy-form textarea, .strategy-form input, #importKind {
+    width: 100%; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px;
+    font: inherit; background: var(--color-surface); color: inherit;
+}
+#importKind { margin-bottom: 16px; }
+.strategy-recent { margin-top: 24px; padding: 24px; }

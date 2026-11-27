@@ -203,6 +203,8 @@ class ItemNameRecognitionNode(BaseNode):
             # 3.1 创建表
             # 3.1.1 创建Schema
             schema = milvus_client.create_schema()
+            for name in ("owner_id", "doc_type", "document_id"):
+                schema.add_field(name, DataType.VARCHAR, max_length=256)
             schema.add_field(
                 field_name="pk",
                 datatype=DataType.INT64,
@@ -253,12 +255,15 @@ class ItemNameRecognitionNode(BaseNode):
         # 4. 插入数据
         # 4.1 构建要插入的数据行(file_title、item_name、稠密向量、稀疏向量)
         insert_data = {
+            "owner_id": "public", "doc_type": "knowledge", "document_id": "",
             "file_title": file_title,
             "item_name": item_name,
             "dense_vector": dense_vector,
             "sparse_vector": sparse_vector
         }
         # 4.2 调用Milvus客户端的方法插入数据
+        from knowledge.strategy.scope import require_scoped_collection
+        require_scoped_collection(milvus_client, collection_name)
         milvus_client.insert(
             collection_name=collection_name,
             data=insert_data,

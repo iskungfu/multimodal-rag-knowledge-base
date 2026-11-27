@@ -2,8 +2,6 @@ import asyncio
 import json
 from typing import Dict, Any
 
-from agents.mcp import MCPServerStreamableHttp
-
 from knowledge.processor.query_processor.base import BaseNode
 from knowledge.processor.query_processor.exceptions import StateFieldError, ConfigurationError
 from knowledge.processor.query_processor.state import QueryGraphState
@@ -49,6 +47,7 @@ class WebSearchNode(BaseNode):
         return {"web_search_docs": web_search_docs}
 
     async def mcp_web_search(self, rewritten_query: str):
+        from agents.mcp import MCPServerStreamableHttp
         # 1. 创建MCP客户端
         async with MCPServerStreamableHttp(
                 name="search_mcp",

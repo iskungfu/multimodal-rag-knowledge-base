@@ -1,10 +1,12 @@
+from __future__ import annotations
 import threading
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
 from openai import OpenAI
-from pymilvus.model.hybrid import BGEM3EmbeddingFunction
+if TYPE_CHECKING:
+    from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 from knowledge.utils.clients.base import BaseClientManager, logger
 
 load_dotenv()
@@ -108,6 +110,7 @@ class AIClients(BaseClientManager):
 
             fp16 = fp16_str.lower() in ("true", "1")
             # 2. 创建
+            from pymilvus.model.hybrid import BGEM3EmbeddingFunction
             bge_m3_ef = BGEM3EmbeddingFunction(
                 model_name=model_name,
                 device=device,

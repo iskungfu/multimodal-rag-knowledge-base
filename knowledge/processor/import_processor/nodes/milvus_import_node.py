@@ -40,6 +40,8 @@ class _MilvusSchemaBuilder:
     def build_schema(cls, milvus_client: MilvusClient, dim: int):
         #1. 创建Schema
         schema = milvus_client.create_schema()
+        for name in ("owner_id", "doc_type", "document_id"):
+            schema.add_field(name, DataType.VARCHAR, max_length=256)
         #2. 添加字段
         #2.1 主键:自增,由Milvus生成,插入后回填到chunk的chunk_id上
         schema.add_field(
@@ -155,6 +157,9 @@ class _MilvusInserter:
                 "content": chunk.get("text") or chunk.get("content") or "",
                 "dense_vector": chunk["dense_vector"],
                 "sparse_vector": chunk["sparse_vector"],
+                "owner_id": "public",
+                "doc_type": "knowledge",
+                "document_id": "",
             })
 
         return insert_rows
@@ -247,6 +252,8 @@ class MilvusImportNode(BaseNode):
             )
             self.logger.info(f"Collection:{collection_name}创建成功,稠密向量维度为{dim}")
         #4. 插入数据,并把自增主键回填到chunk中
+        from knowledge.strategy.scope import require_scoped_collection
+        require_scoped_collection(milvus_client, collection_name)
         chunk_ids = _MilvusInserter.insert(milvus_client, collection_name, validated_chunks)
         self.logger.info(f"向量入库成功,共写入{len(chunk_ids)}条数据,Collection:{collection_name}")
 

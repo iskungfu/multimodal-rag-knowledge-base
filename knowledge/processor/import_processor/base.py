@@ -88,6 +88,9 @@ class BaseNode(ABC):
 
             return result
         except Exception as e:
+            if state.get("owner_id"):
+                self.logger.error("%s 执行失败 (%s)", self.name, type(e).__name__)
+                raise ImportProcessError(message="策略处理节点失败", node_name=self.name) from None
             self.logger.error(f"{self.name} 执行失败: {e}")
             # 进度登记：节点失败时不加入 done 列表，保留在 running 中，
             # 前端会显示"正在处理 xxx..."直至任务状态变为 failed

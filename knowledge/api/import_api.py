@@ -1,7 +1,8 @@
 import uvicorn
-from fastapi import FastAPI, UploadFile, BackgroundTasks
+from fastapi import FastAPI, UploadFile, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.params import Depends
+from fastapi.exceptions import RequestValidationError
 from starlette.staticfiles import StaticFiles
 
 from knowledge.core.deps import get_file_process_service
@@ -9,7 +10,8 @@ from knowledge.schema.upload_schema import UploadResponse, TaskStatusResponse
 from knowledge.core.paths import get_front_page_dir
 from knowledge.service.file_process_service import FileProcessService
 
-from knowledge.utils.task_util import get_task_info
+from knowledge.utils.task_util import get_task_info, get_task_result
+from knowledge.api.strategy_api import router as strategy_router, strategy_validation_error
 
 
 def register_router(app: FastAPI):
@@ -30,6 +32,8 @@ def register_router(app: FastAPI):
 
     @app.get("/status/{task_id}",response_model=TaskStatusResponse)
     def get_task_status(task_id: str):
+        if get_task_result(task_id, "private") or not get_task_info(task_id)["status"]:
+            raise HTTPException(404, "任务不存在")
         #1. 获取当前任务的信息
         task_info = get_task_info(task_id)
 
@@ -59,6 +63,8 @@ def create_app():
 
     #4. 注册路由
     register_router(app)
+    app.include_router(strategy_router)
+    app.add_exception_handler(RequestValidationError, strategy_validation_error)
 
     return app
 

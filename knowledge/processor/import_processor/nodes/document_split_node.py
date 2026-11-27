@@ -31,7 +31,8 @@ class DocumentSplitNode(BaseNode):
         # for chunk in chunks:
         #     print(chunk)
         #5. 将chunks备份成json文件，便于后续测试
-        self._backup_chunks(chunks, state.get("file_dir", ""), file_title)
+        if not state.get("owner_id"):
+            self._backup_chunks(chunks, state.get("file_dir", ""), file_title)
 
         #6. 更新state并返回
         state["chunks"] = chunks
