@@ -13,7 +13,7 @@ def source_key(document):
             document.get("review_id") or document.get("document_id"), str(document.get("chunk_id")))
 
 
-def fuse(routes, k=60, limit=18):
+def fuse(routes, rank_constant=60, limit=18):
     scores, documents = {}, {}
     for kind in KINDS:
         seen = set()
@@ -22,7 +22,7 @@ def fuse(routes, k=60, limit=18):
             if key in seen:
                 continue
             seen.add(key)
-            scores[key] = scores.get(key, 0) + 1 / (k + rank)
+            scores[key] = scores.get(key, 0) + 1 / (rank_constant + rank)
             documents[key] = {**document, "score": scores[key]}
     return sorted(documents.values(), key=lambda doc: (-doc["score"], source_key(doc)))[:limit]
 
@@ -56,7 +56,7 @@ class InvestmentRetriever:
         from knowledge.utils.clients.storage_clients import StorageClients
         from knowledge.utils.milvus_util import create_hybrid_search_requests, execute_hybrid_search_query
         from knowledge.strategy.scope import scoped_fields, legacy_public_collection
-        client = self.client or StorageClients.get_milvus_client()
+        client = self.client if self.client is not None else StorageClients.get_milvus_client()
         collection = self.collections[kind]
         if not collection:
             raise ValueError("未配置公共知识库")
@@ -89,7 +89,7 @@ class InvestmentRetriever:
             identifier = entity.get("document_id") or ""
             content = entity.get("content")
             if hit.get("id") is None or not isinstance(content, str) or not content.strip() or len(content) > 12000:
-                continue  # 不截断个人条件或复盘事件。
+                continue
             if kind == "personal":
                 if not identifier or not repository.find_one({"_id": identifier, "owner_id": OWNER,
                         "doc_type": "personal", "status": "completed"}, {"_id": 1}):
@@ -98,13 +98,19 @@ class InvestmentRetriever:
                 if not identifier or entity.get("review_id") != identifier:
                     continue
                 record = repository.find_one({"_id": identifier, "owner_id": OWNER, "doc_type": "review",
-                    "index_status": "completed", "index_version": entity.get("index_version")}, {"index_manifest": 1})
+                    "index_status": "completed", "index_version": entity.get("index_version")}, {"index_manifest": 1, "original_text": 1})
                 if not record or record.get("index_manifest", {}).get(str(hit["id"])) != digest(content) or entity.get("content_hash") != digest(content):
                     continue
+                original = record.get("original_text")
+                if not isinstance(original, str) or not original.strip() or len(original) > 10000:
+                    continue
+                content = "复盘完整原文（计划、挂单和未知不代表成交，请核对所有前提）：\n" + original
             item = redact_value({"source": kind, "collection": collection, "document_id": identifier,
                 "review_id": identifier if kind == "review" else "", "chunk_id": str(hit["id"]),
                 "owner_id": "public" if kind == "knowledge" else OWNER,
                 "title": entity.get("title") or kind, "content": content})
+            if kind == "review":
+                item["vector_excerpt"] = redact_value(entity["content"])
             if source_key(item) not in seen:
                 items.append(item)
                 seen.add(source_key(item))

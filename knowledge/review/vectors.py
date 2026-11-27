@@ -41,17 +41,19 @@ class ReviewVectors:
 
     def write(self, texts, embedded, owner, review_id, version):
         self.validate()
-        if not owner or not review_id or not version or len(texts) != len(embedded["dense"]) or len(texts) != len(embedded["sparse"]):
+        if not owner or not review_id or not version or not texts or len(texts) != len(embedded["dense"]) or len(texts) != len(embedded["sparse"]):
             raise ValueError("复盘向量不完整")
         rows, manifest = [], {}
         for index, text in enumerate(texts):
+            if not isinstance(text, str) or not text.strip() or len(text) > 12000 or len(text.encode("utf-8")) > 65535:
+                raise ValueError("复盘片段超过检索内容预算")
             if len(embedded["dense"][index]) != self.dim or not embedded["sparse"][index]:
                 raise ValueError("复盘向量不完整")
             identifier = digest(json.dumps([owner, review_id, version, index]))
             manifest[identifier] = digest(text)
             rows.append({"id": identifier, "owner_id": owner, "doc_type": "review", "document_id": review_id,
                          "review_id": review_id, "index_version": version, "content_hash": digest(text),
-                         "title": "复盘原文" if index == 0 else "复盘抽取摘要", "content": text,
+                         "title": "复盘原文" if text.startswith("复盘原文") else "复盘抽取摘要", "content": text,
                          "dense_vector": embedded["dense"][index], "sparse_vector": embedded["sparse"][index]})
         result = self.client.upsert(self.collection, rows, timeout=30)
         if result.get("upsert_count") != len(rows):

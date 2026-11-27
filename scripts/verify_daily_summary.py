@@ -30,6 +30,8 @@ def main():
         print('必须提供独立 AFK_TEST_DB_NAME。')
         return 1
     prefix = 'summary_accept_' + uuid.uuid4().hex[:16]
+    os.environ.update(MONGO_DB_NAME=db_name, STRATEGY_COLLECTION=prefix + '_empty_personal',
+                      REVIEW_COLLECTION=prefix + '_empty_review', CHUNKS_COLLECTION=prefix + '_empty_knowledge')
     vector_collection = prefix + '_vectors'
     report = {'mode': 'host' if args.host else 'storage', 'checks': {}, 'cleanup': {}, 'passed': False}
     mongo = milvus = None

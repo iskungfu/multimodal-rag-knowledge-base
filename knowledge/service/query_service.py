@@ -30,10 +30,14 @@ logger = logging.getLogger(__name__)
 class QueryService:
     """查询业务服务"""
 
-    def __init__(self, resolver=None, risk=None, graph=None):
+    def __init__(self, resolver=None, risk=None, graph=None, investment=None):
         self.resolver = resolver or SymbolResolver()
         self.risk = risk or RiskService()
         self.graph = graph
+        if investment is None:
+            from knowledge.service.investment_service import InvestmentAssistant
+            investment = InvestmentAssistant()
+        self.investment = investment
 
     # ── ID 生成 ──
 
@@ -62,12 +66,29 @@ class QueryService:
         state = {"original_query": safe_query, "session_id": session_id,
                  "task_id": task_id, "is_stream": is_stream}
         error = ""
+        context = None
         try:
-            resolution = self.resolver.resolve(safe_query)
-            if resolution.security:
-                answer = self.risk.answer(resolution.security)
-            elif resolution.message:
+            from knowledge.investment.routing import route_query
+            route = route_query(safe_query, self.resolver, get_recent_messages(session_id, limit=4))
+            resolution = route["resolution"]
+            if resolution.message:
                 answer = resolution.message
+            elif route["investment"]:
+                market = []
+                security = None
+                if resolution.security:
+                    security = {"code": resolution.security.code, "name": resolution.security.name}
+                    try:
+                        risk_answer = self.risk.answer(resolution.security)
+                    except Exception:
+                        risk_answer = "行情服务暂不可用，无法判断当前个股风险。"
+                    market = [{"id": "stock:" + security["code"], "text": risk_answer}]
+                elif route["market"]:
+                    from knowledge.investment.market import index_context
+                    market = index_context()
+                state.update(self.investment.answer(route["query"], market_context=market))
+                answer = state["answer"]
+                context = {"investment": True, "query": route["query"][:1500], "security": security, "market": route["market"]}
             else:
                 state["knowledge_query"] = resolution.knowledge
                 state = (self.graph or query_app).invoke(state)
@@ -82,7 +103,7 @@ class QueryService:
         answer = finalize_answer(answer, citation_ids)
         user_saved = save_chat_message(session_id, "user", safe_query,
                           rewritten_query=state.get("rewritten_query", ""),
-                          item_names=state.get("item_names", []))
+                          item_names=state.get("item_names", []), query_context=context)
         saved = save_chat_message(session_id, "assistant", answer,
                                   item_names=state.get("item_names", []), citation_ids=citation_ids)
         if not saved or not user_saved:

@@ -11,17 +11,59 @@ def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def index_texts(document):
+def index_texts(document, tokenizer, max_tokens):
     original = redact_text(document["original_text"])
-    # 不生成第二份推测摘要，明确保留抽取状态、计划/未知/冲突等原有语义。
-    extraction = document.get("extraction")
-    summary = json.dumps({"extraction_status": document.get("extraction_status", "pending"),
-                          "extraction": redact_value(extraction)}, ensure_ascii=False, separators=(",", ":"))
-    # 摘要过大时保留原文，避免重复evidence撑爆单个Milvus VARCHAR。
-    if len(summary.encode("utf-8")) > 60000:
-        summary = "抽取摘要过长，请核对完整复盘原文；不得推断已成交或持仓。"
-    return ["复盘原文（计划、挂单和未知不等于成交）：\n" + original,
-            "复盘抽取摘要（可能有误，请与原文核对）：\n" + summary]
+    original_prefix = "复盘原文（仅片段，须核对全文前提；计划、挂单和未知不等于成交，不得推断持仓或标的）：\n"
+    summary_prefix = "复盘抽取摘要（仅片段，可能有误，须核对全文；计划、未知及冲突不等于成交或持仓）：\n"
+    if not isinstance(max_tokens, int) or max_tokens <= 0:
+        raise ValueError("无效的复盘 token 预算")
+
+    def fits(text):
+        return len(text) <= 12000 and len(text.encode("utf-8")) <= 65535 and len(tokenizer.encode(
+            text, add_special_tokens=True, truncation=False)) <= max_tokens
+
+    def chunks(content, prefix):
+        offset = 0
+        while offset < len(content):
+            lower, upper = 1, min(len(content) - offset, 12000 - len(prefix))
+            length = 0
+            while lower <= upper:
+                middle = (lower + upper) // 2
+                candidate = redact_text(prefix + content[offset:offset + middle])
+                if fits(candidate):
+                    length = middle
+                    lower = middle + 1
+                else:
+                    upper = middle - 1
+            if not length:
+                raise ValueError("复盘上下文与单个字符超过向量 token 预算")
+            if offset + length < len(content):
+                window = content[offset:offset + length]
+                boundary = max((window.rfind(separator) + len(separator)
+                                for separator in ("\n\n", "\n", "。", "！", "？", ". ", "! ", "? ")
+                                if separator in window), default=0)
+                if boundary >= length // 2 and boundary > 0:
+                    candidate = redact_text(prefix + content[offset:offset + boundary])
+                    if fits(candidate):
+                        length = boundary
+            yield redact_text(prefix + content[offset:offset + length])
+            offset += length
+
+    texts = list(chunks(original, original_prefix))
+    extraction = redact_value(document.get("extraction"))
+    status = document.get("extraction_status", "pending")
+    summaries = [{"extraction_status": status, "extraction": extraction}]
+    if extraction is not None:
+        summaries = [{"extraction_status": status, "event": event} for event in extraction.get("events", [])]
+        summaries.append({"extraction_status": status, "lesson": extraction.get("lesson"),
+                          "emotions": extraction.get("emotions", [])})
+    for summary in summaries:
+        prefix = summary_prefix
+        if "event" in summary:
+            event = summary["event"]
+            prefix += f'事件状态：{event.get("status", "unknown")}；名称代码冲突：{event.get("identity_conflict", False)}。\n'
+        texts.extend(chunks(json.dumps(summary, ensure_ascii=False, separators=(",", ":")), prefix))
+    return texts
 
 
 def embed_texts(texts):
@@ -31,10 +73,38 @@ def embed_texts(texts):
 
 
 class ReviewIndexer:
-    def __init__(self, repository, vectors=None, embed=None, now=None):
+    def __init__(self, repository, vectors=None, embed=None, now=None, tokenizer=None, max_tokens=None):
         self.repository, self.vectors = repository, vectors
         self.embed = embed or embed_texts
         self.now = now or (lambda: datetime.now(timezone.utc))
+        self.tokenizer, self.max_tokens = tokenizer, max_tokens
+
+    def token_budget(self):
+        if self.tokenizer is not None:
+            return self.tokenizer, self.max_tokens if self.max_tokens is not None else 512
+        from knowledge.utils.clients.ai_clients import AIClients
+        client = AIClients.get_bge_m3_client()
+        limit = client._encode_config.get("max_length") or client.model.passage_max_length
+        if self.max_tokens is not None:
+            limit = min(limit, self.max_tokens)
+        return client.model.tokenizer, limit
+
+    def discard_unpublished(self, claim, vectors):
+        can_delete = False
+        try:
+            can_delete = self.repository.finish_index(claim, self.now())
+        except Exception:
+            pass
+        if not can_delete:
+            try:
+                can_delete = self.repository.index_is_unpublished(claim)
+            except Exception:
+                return
+        if can_delete and vectors is not None:
+            try:
+                vectors.delete_version(claim["owner_id"], claim["_id"], claim["index_token"])
+            except Exception:
+                pass
 
     def index(self, review_id, owner):
         claim = self.repository.claim_index(review_id, owner, self.now())
@@ -47,23 +117,14 @@ class ReviewIndexer:
                 from knowledge.utils.clients.storage_clients import StorageClients
                 vectors = ReviewVectors(StorageClients.get_milvus_client(),
                                         os.getenv("REVIEW_COLLECTION", "review_chunks_v1"))
-            texts = index_texts(claim)
+            tokenizer, max_tokens = self.token_budget()
+            texts = index_texts(claim, tokenizer, max_tokens)
             embedded = self.embed(texts)
             vectors.prepare()
-            # 仅清理本记录旧的不可见版本；过期worker即使再写入也无法发布。
-            if claim.get("previous_index_token"):
-                vectors.delete_version(owner, review_id, claim["previous_index_token"])
+            for version in {claim.get("previous_index_token"), claim.get("previous_index_version")} - {None}:
+                vectors.delete_version(owner, review_id, version)
             manifest = vectors.write(texts, embedded, owner, review_id, claim["index_token"])
             if not self.repository.finish_index(claim, self.now(), manifest):
-                vectors.delete_version(owner, review_id, claim["index_token"])
+                self.discard_unpublished(claim, vectors)
         except Exception:
-            # 原文及抽取已独立提交。存储或模型异常不回显、不回滚。
-            try:
-                self.repository.finish_index(claim, self.now())
-            except Exception:
-                pass  # 租约到期可恢复，不以数据库故障覆盖已保存文本。
-            if vectors is not None:
-                try:
-                    vectors.delete_version(owner, review_id, claim["index_token"])
-                except Exception:
-                    pass
+            self.discard_unpublished(claim, vectors)

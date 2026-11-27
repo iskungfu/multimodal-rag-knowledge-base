@@ -22,6 +22,11 @@ def main():
     if not db or db in {os.getenv('MONGO_DB_NAME', 'kb001'), 'kb001', 'admin', 'config', 'local'}:
         print('必须设置与业务库不同的 AFK_TEST_DB_NAME。')
         return 1
+    query_prefix = 'risk_query_' + uuid.uuid4().hex
+    os.environ.update(MONGO_DB_NAME=db, STRATEGY_COLLECTION=query_prefix + '_empty_personal',
+                      REVIEW_COLLECTION=query_prefix + '_empty_review', DAILY_SUMMARY_ENABLED='0')
+    if not args.rag_query:
+        os.environ['CHUNKS_COLLECTION'] = query_prefix + '_empty_knowledge'
     from pymongo import MongoClient
     from fastapi.testclient import TestClient
     from knowledge.api.query_api import create_app

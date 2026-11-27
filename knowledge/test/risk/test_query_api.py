@@ -51,7 +51,8 @@ def test_verified_numeric_citation_survives_policy_and_history(streaming):
         "answer": f"参考 [chunk_id={citation_id}]。手机号：13800138000。未核实 [chunk_id=13800138000]。",
         "reranked_docs": [{"chunk_id": citation_id, "content": "自建公共测试资料"}],
     }
-    with api(QueryService(resolver=resolver, graph=graph)) as client:
+    investment = SimpleNamespace(answer=lambda query, market_context=None: graph.invoke({"original_query": query}))
+    with api(QueryService(resolver=resolver, graph=graph, investment=investment)) as client:
         answer = assert_answer(client, "公共知识引用", streaming)
     assert f"[chunk_id={citation_id}]" in answer
     assert "13800138000" not in answer
@@ -186,8 +187,9 @@ def test_public_knowledge_skips_product_extraction(monkeypatch):
     monkeypatch.setattr(AIClients, 'get_llm_client', lambda **kw: llm)
     resolver = Mock()
     resolver.resolve.return_value = Resolution(knowledge=True)
-    with api(QueryService(resolver=resolver, graph=create_query_graph())) as client:
-        answer = assert_answer(client, '什么是分散投资？', False)
+    state = create_query_graph().invoke({'original_query': '什么是分散投资？', 'session_id': 'legacy-knowledge',
+                                        'task_id': 'legacy-knowledge', 'is_stream': False, 'knowledge_query': True})
+    answer = state['answer']
     assert observed and '[1]' in answer
     assert '公共知识' in llm.invoke.call_args[0][0]
 

@@ -36,6 +36,8 @@ def main():
         "DAILY_SUMMARY_ENABLED": "0",
         "ITEM_NAME_COLLECTION": collections[0],
         "CHUNKS_COLLECTION": collections[1],
+        "STRATEGY_COLLECTION": run_id + "_empty_personal",
+        "REVIEW_COLLECTION": run_id + "_empty_review",
         "MINIO_BUCKET_NAME": bucket,
         "HF_HUB_OFFLINE": "1",
         "TOKENIZERS_PARALLELISM": "false",
@@ -163,9 +165,17 @@ def main():
                             for key in ("embedding_chunks", "hyde_embedding_chunks", "rrf_chunks", "reranked_docs", "web_search_docs"):
                                 if key in outputs:
                                     observed[key] = outputs[key]
+                            if "fused" in outputs:
+                                observed["rrf_chunks"] = outputs["fused"]
+                            if "selection_status" in outputs:
+                                observed["selection_status"] = outputs["selection_status"]
 
                 observed = {}
                 query_module.query_app = query_module.query_app.with_config(callbacks=[Observer()])
+                if args.knowledge:
+                    from knowledge.core.deps import get_query_service
+                    investment = get_query_service().investment
+                    investment.graph = investment.graph.with_config(callbacks=[Observer()])
                 question = "青禾 QH-731 复盘记录器执行离线复盘校验时，校验口令是什么，回看窗口设为多少个交易日？请引用手册。"
                 if args.knowledge:
                     question = "根据公共知识资料，测试手册中的离线复盘校验口令和回看窗口分别是什么？请引用来源。"
@@ -192,11 +202,13 @@ def main():
                     from knowledge.utils.answer_policy import DISCLAIMER
 
                     check("answer_disclaimer", answer.endswith(DISCLAIMER) and answer.count(DISCLAIMER) == 1)
-                    report["retrieval_counts"] = {key: len(value) for key, value in observed.items()}
+                    report["retrieval_counts"] = {key: len(value) for key, value in observed.items() if isinstance(value, list)}
                     check("rrf_retrieval", bool(observed.get("rrf_chunks")))
                     docs = observed.get("reranked_docs", [])
                     check("real_reranker", bool(docs) and all(doc.get("score") is not None for doc in docs))
-                    check("local_evidence", any("7391" in doc.get("content", "") and doc.get("source") == "local" for doc in docs))
+                    check("local_evidence", any("7391" in doc.get("content", "") and doc.get("source") == ("knowledge" if args.knowledge else "local") for doc in docs))
+                    if args.knowledge:
+                        check("actual_model_selection", observed.get("selection_status") == "completed")
                     check("grounded_answer", "7391" in answer and "17" in answer, answer)
                     session = result["session_id"]
                     history = query_client.get("/history/" + session).json()["items"]

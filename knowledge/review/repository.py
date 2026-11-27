@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from pymongo import DESCENDING, ReturnDocument
+from pymongo import DESCENDING, ReadPreference, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 
@@ -37,6 +37,9 @@ class ReviewRepository:
         changes = {
             "extraction": extraction, "extraction_status": "failed" if error else "succeeded",
             "extraction_error": error, "updated_at": datetime.now(timezone.utc),
+            "index_status": "pending", "index_token": uuid4().hex, "index_manifest": {},
+            "index_lease_until": None, "index_retry_after": None, "index_error": None,
+            "index_attempts": 0, "index_window": None,
         }
         self.collection.update_one({"_id": review_id, "owner_id": owner_id}, {"$set": changes})
         return changes
@@ -66,7 +69,6 @@ class ReviewRepository:
         attempts = 0 if reset else old.get("index_attempts", 0)
         if attempts >= 3:
             return None
-        # token 对旧记录也使用显式缺失匹配，防止并发首次claim。
         scope["index_token"] = old.get("index_token")
         scope["index_status"] = old.get("index_status")
         claim = self.collection.find_one_and_update(scope, {"$set": {
@@ -77,7 +79,19 @@ class ReviewRepository:
         }}, return_document=ReturnDocument.AFTER)
         if claim:
             claim["previous_index_token"] = old.get("index_token")
+            claim["previous_index_version"] = old.get("index_version")
         return claim
+
+    def index_is_unpublished(self, claim):
+        document = self.collection.with_options(read_preference=ReadPreference.PRIMARY).find_one({
+            "_id": claim["_id"], "owner_id": claim["owner_id"], "doc_type": "review",
+        }, {"index_status": 1, "index_token": 1, "index_version": 1})
+        if document is None:
+            return True
+        if document.get("index_status") == "completed" and document.get("index_version") == claim["index_token"]:
+            return False
+        return document.get("index_token") != claim["index_token"] or document.get("index_status") not in {
+            "processing", "completed"}
 
     def finish_index(self, claim, now, manifest=None):
         success = manifest is not None

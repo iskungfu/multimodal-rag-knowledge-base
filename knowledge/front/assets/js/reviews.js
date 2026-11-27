@@ -1,4 +1,4 @@
-import {saveReview, fetchReviews} from './api.js';
+import {saveReview, fetchReviews, indexReview} from './api.js';
 
 const form = document.getElementById('reviewForm');
 const input = document.getElementById('reviewText');
@@ -10,6 +10,13 @@ let draftId = null;
 let loaded = false;
 
 const states = {executed: '已成交', planned: '计划 / 未成交', unknown: '成交状态未明确'};
+const indexStates = {
+    pending: '待建立索引，原文已保存。',
+    processing: '正在建立索引，原文已保存；稍后刷新查看。',
+    completed: '索引已完成，可在提问时检索这条复盘。',
+    failed: '索引失败，原文已保存，可稍后重试。',
+    interrupted: '索引中断，原文已保存，可重试。',
+};
 
 function node(tag, text) {
     const element = document.createElement(tag);
@@ -53,7 +60,38 @@ function renderReview(review) {
             ? '抽取未成功，复盘文本已保存，可按原文核对。'
             : '复盘文本已保存，抽取尚未完成；稍后可刷新查看。'));
     }
-    article.append(node('p', review.disclaimer));
+    const indexing = document.createElement('div');
+    const indexStatus = review.index_status || 'pending';
+    indexing.append(node('p', `检索索引：${indexStates[indexStatus] || '状态暂不可用，原文已保存。'}`));
+    if (!['completed', 'processing'].includes(indexStatus)) {
+        const retry = node('button', indexStatus === 'pending' ? '建立索引' : '重试索引');
+        retry.type = 'button';
+        retry.className = 'btn btn-ghost btn-sm';
+        retry.disabled = review.index_can_retry === false;
+        if (retry.disabled && review.index_retry_after) {
+            indexing.append(node('p', `可重试时间：${new Date(review.index_retry_after).toLocaleString('zh-CN')}，届时请刷新。`));
+        }
+        retry.addEventListener('click', async () => {
+            if (retry.disabled) return;
+            retry.disabled = true;
+            retry.textContent = '正在建立索引…';
+            indexing.setAttribute('aria-busy', 'true');
+            status.textContent = '正在建立复盘索引，原文已保存。';
+            try {
+                const updated = await indexReview(review.id);
+                article.replaceWith(renderReview(updated));
+                status.textContent = updated.warning || indexStates[updated.index_status] || '请刷新查看索引状态。';
+            } catch (error) {
+                retry.textContent = '重试索引';
+                retry.disabled = false;
+                status.textContent = `${error.message || '索引暂不可用。'} 复盘原文已保存，请刷新查看状态。`;
+            } finally {
+                indexing.removeAttribute('aria-busy');
+            }
+        });
+        indexing.append(retry);
+    }
+    article.append(indexing, node('p', review.disclaimer));
     return article;
 }
 

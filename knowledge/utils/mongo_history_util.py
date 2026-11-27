@@ -52,6 +52,7 @@ def save_chat_message(
         item_names: Optional[List[str]] = None,
         message_id: Optional[str] = None,
         citation_ids: Optional[List[str]] = None,
+        query_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """保存一条聊天消息，返回插入的文档 id（失败时返回空字符串）"""
     if not session_id or not text:
@@ -67,6 +68,8 @@ def save_chat_message(
         "citation_ids": list(citation_ids or []) if role == "assistant" else [],
         "ts": time.time(),
     }
+    if role == "user" and query_context:
+        document["query_context"] = redact_value(query_context)
 
     try:
         result = _get_collection().insert_one(document)

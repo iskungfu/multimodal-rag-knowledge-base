@@ -166,6 +166,14 @@ export function fetchReviews() {
     return request('/reviews?limit=20');
 }
 
+export function indexReview(reviewId) {
+    return request(`/reviews/${encodeURIComponent(reviewId)}/index`, {
+        method: 'POST',
+        timeout: 180000,
+        timeoutMessage: '等待索引超时，复盘原文已保存。请刷新查看状态后再重试。',
+    });
+}
+
 export function submitQuery({query, sessionId, isStream}) {
     const stream = Boolean(isStream);
     // 流式只等 task_id；非流式要等整条主图跑完，两者不能共用同一个超时

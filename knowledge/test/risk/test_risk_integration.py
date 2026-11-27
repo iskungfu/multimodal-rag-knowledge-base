@@ -2,6 +2,7 @@
 import os
 import uuid
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import pytest
 from pymongo import MongoClient
@@ -95,6 +96,10 @@ def test_actual_llm_answer_boundary(isolated_storage, monkeypatch, streaming):
                                   'content': '分散投资是把资金分布在多个标的，不能消除全部风险。', 'source': 'knowledge'}]})
     resolver = Mock()
     resolver.resolve.return_value = Resolution(knowledge=True)
-    with api(QueryService(resolver=resolver, graph=FixtureContextGraph())) as client:
+    graph = FixtureContextGraph()
+    investment = SimpleNamespace(answer=lambda query, market_context=None: graph.invoke({
+        'original_query': query, 'session_id': 'risk-test', 'task_id': uuid.uuid4().hex, 'is_stream': streaming,
+    }))
+    with api(QueryService(resolver=resolver, graph=graph, investment=investment)) as client:
         answer = assert_answer(client, '请用一句中文解释分散投资，引用提供的资料。', streaming)
     assert '分散' in answer and 'LLM暂无' not in answer and '查询流程执行失败' not in answer
