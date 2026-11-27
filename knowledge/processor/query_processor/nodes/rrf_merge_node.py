@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import List, Any, Dict, Tuple
 
 from knowledge.processor.query_processor.base import BaseNode
@@ -40,13 +41,13 @@ class RrfMergeNode(BaseNode):
         formated_chunks = []
         # 1. 遍历输入的chunks
         for chunk in chunks:
-            if not chunk or not isinstance(chunk, dict):
+            if not chunk or not isinstance(chunk, Mapping):
                 continue
             # 1. 获取chunk_id
             chunk_id = chunk.get("id")
             # 2. 获取entity
             entity = chunk.get("entity")
-            if not entity or not isinstance(entity, dict):
+            if not entity or not isinstance(entity, Mapping):
                 continue
             # 2.1 获取title
             title = entity.get("title", "")

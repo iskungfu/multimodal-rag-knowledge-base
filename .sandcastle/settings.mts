@@ -35,6 +35,9 @@ export function loadSettings() {
     if (appConfig[name]) storageEnv[name] = appConfig[name];
   }
   Object.assign(env, storageEnv);
+  for (const name of ["OPEN_API_BASE", "OPEN_API_KEY", "LLM_DEFAULT_MODEL"]) {
+    if (appConfig[name]) env[name] = appConfig[name];
+  }
   env.AFK_TEST_DB_NAME = `sandcastle_test_${Date.now().toString(36)}`;
   const storageVenv = resolve(homedir(), ".local/share/shopkeeper-brain/storage-probe");
   const storagePython = resolve(storageVenv, "bin/python");

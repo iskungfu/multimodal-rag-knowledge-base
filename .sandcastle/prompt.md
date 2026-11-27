@@ -21,8 +21,9 @@
 3. 实现一个最小且完整的任务，避免无关重构。
 4. 使用沙箱 Linux 文件系统中的 Python 虚拟环境：`python3 -m venv /tmp/shopkeeper-venv`，之后通过 `/tmp/shopkeeper-venv/bin/python` 运行安装和测试。项目位于 WSL 的 Windows 挂载盘，不要在项目内创建虚拟环境或链接，避免 DrvFS 权限问题和临时文件入库。按实际测试需求安装依赖；完整应用依赖见 requirements.txt。已设置可用的 PyPI 镜像；`AFK_STORAGE_PYTHON` 指向只读存储客户端环境，可运行独立集成探针，不要向其中安装包。不要调用不存在的 npm test/typecheck，不复用 Windows 虚拟环境。
 5. 运行改动对应的测试并记录真实结果。MongoDB、Milvus、MinIO 的连接参数已从本机配置注入环境，不要打印变量值。MongoDB 写入测试必须使用 AFK_TEST_DB_NAME 指定的独立测试库；其他服务使用独立测试 collection/bucket，禁止改写或清空现有业务数据。需要服务或模型的测试必须实测，不能把未执行的集成测试记为通过。
-6. 将实现内容、验证结果和未验证项写入本地 `.sandcastle/results/issue-<编号>.md`，明确标记为完成或阻塞。
-7. 检查 diff、敏感信息和 `git diff --check`，提交本次任务相关的文件及结果记录。commit 使用 `RALPH: <任务说明> (#编号)`。保持 Issue 打开，由用户审阅结果后决定发布和关闭。
+6. 应用 LLM 的 OPEN_API_BASE、OPEN_API_KEY、LLM_DEFAULT_MODEL 已按最小允许列表注入。涉及抽取时，使用自建、无敏感信息的文本实测实际模型；明确区分已执行交易与交易计划、名称代码冲突和未明示字段。不要打印凭据、使用用户私人交易记录或为了仅调用 LLM 安装整个向量模型依赖。网络错误、模型调用失败必须记录，不能用 mock 结果替代真实验收。
+7. 将实现内容、验证结果和未验证项写入本地 `.sandcastle/results/issue-<编号>.md`，明确标记为完成或阻塞。
+8. 检查 diff、敏感信息和 `git diff --check`，提交本次任务相关的文件及结果记录。commit 使用 `RALPH: <任务说明> (#编号)`。保持 Issue 打开，由用户审阅结果后决定发布和关闭。
 
 ## 执行边界
 

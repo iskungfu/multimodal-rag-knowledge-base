@@ -759,6 +759,7 @@ async function runQuery(question, bot) {
                         : bot.raw;
                 finalizeBot(bot, {
                     answer: finalText,
+                    error: payload?.error || '',
                     imageUrls: payload?.image_urls || [],
                     doneList: bot.done,
                 });

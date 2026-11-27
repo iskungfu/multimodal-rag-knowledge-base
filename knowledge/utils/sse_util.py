@@ -85,6 +85,8 @@ async def sse_generator(task_id: str, request: Request) -> AsyncGenerator[str, N
             event = msg.get("event")
             data = msg.get("data")
             yield _sse_pack(event, data)
+            if event == SSEEvent.FINAL:
+                break
 
     except (ConnectionResetError, BrokenPipeError):
         # 客户端刷新页面或关闭标签页，TCP 管道破裂，静默退出

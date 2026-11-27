@@ -37,7 +37,7 @@ class AnswerOutputNode(BaseNode):
             state["answer"] = llm_answer
             # 4.1.3 流式输出完之后，最终要告诉前端 SSE通道关闭了
             if is_stream:
-                push_sse_event(task_id=task_id, event=SSEEvent.FINAL, data={})
+                push_sse_event(task_id=task_id, event=SSEEvent.FINAL, data={"answer": llm_answer})
 
 
         # 5. 保存历史会话信息到MongoDB中
@@ -47,13 +47,11 @@ class AnswerOutputNode(BaseNode):
 
     # 输出已有答案
     def _push_exist_answer(self, answer: str, is_stream: bool, task_id: str):
+        set_task_result(task_id=task_id, key="answer", value=answer)
         # 1. 判断到底是流式输出还是非流式输出
         if is_stream:
             # 1.1 流式输出,使用SSE队列
             push_sse_event(task_id=task_id, event=SSEEvent.FINAL, data={"answer": answer})
-        else:
-            # 1.2 非流式输出
-            set_task_result(task_id=task_id, key="answer", value=answer)
 
     # 构建答案生成的上下文prompt
     def _build_answer_prompt(self, state: QueryGraphState, max_context_chars: int) -> str:
@@ -195,8 +193,7 @@ class AnswerOutputNode(BaseNode):
         else:
             # 2.2 如果是非流式输出,则直接调用大模型的生成接口,获取完整答案后进行输出
             llm_result = self._llm_invoke(prompt, llm_client)
-            # 2.3 将生成的答案添加到任务队列中
-            set_task_result(task_id=state.get("task_id"), key="answer", value=llm_result)
+        set_task_result(task_id=state.get("task_id"), key="answer", value=llm_result)
         return llm_result
 
     # 大模型非流式执行

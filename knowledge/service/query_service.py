@@ -9,12 +9,14 @@ from typing import Any, Dict, List
 
 from knowledge.processor.query_processor.main_graph import query_app
 from knowledge.utils.mongo_history_util import clear_history, get_recent_messages
+from knowledge.utils.sse_util import push_sse_event, SSEEvent
 from knowledge.utils.task_util import (
     TASK_STATUS_COMPLETED,
     TASK_STATUS_FAILED,
     TASK_STATUS_PROCESSING,
     get_task_info,
     get_task_result,
+    set_task_result,
     update_task_status,
 )
 
@@ -62,7 +64,11 @@ class QueryService:
 
         except Exception as e:
             logger.error(f"查询流程执行失败(task_id={task_id}): {e}", exc_info=True)
+            message = "查询流程执行失败，请稍后重试。"
+            set_task_result(task_id, "error", message)
             update_task_status(task_id, TASK_STATUS_FAILED)
+            if is_stream:
+                push_sse_event(task_id, SSEEvent.FINAL, {"error": message})
 
     # ── 结果读取 ──
 
