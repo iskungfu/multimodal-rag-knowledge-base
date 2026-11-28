@@ -30,10 +30,14 @@ logger = logging.getLogger(__name__)
 class QueryService:
     """查询业务服务"""
 
-    def __init__(self, resolver=None, risk=None, graph=None, investment=None):
+    def __init__(self, resolver=None, risk=None, graph=None, investment=None, *, history=None,
+                 index_context_factory=None, graph_factory=None):
         self.resolver = resolver or SymbolResolver()
         self.risk = risk or RiskService()
         self.graph = graph
+        self.history = history
+        self.index_context_factory = index_context_factory
+        self.graph_factory = graph_factory
         if investment is None:
             from knowledge.service.investment_service import InvestmentAssistant
             from knowledge.personalization.settings import current_settings
@@ -70,7 +74,7 @@ class QueryService:
         context = None
         try:
             from knowledge.investment.routing import route_query
-            route = route_query(safe_query, self.resolver, get_recent_messages(session_id, limit=4))
+            route = route_query(safe_query, self.resolver, get_recent_messages(session_id, limit=4, collection=self.history))
             resolution = route["resolution"]
             if resolution.message:
                 answer = resolution.message
@@ -86,13 +90,14 @@ class QueryService:
                     market = [{"id": "stock:" + security["code"], "text": risk_answer}]
                 if route["market"]:
                     from knowledge.investment.market import index_context
-                    market.extend(index_context())
+                    market.extend((self.index_context_factory or index_context)())
                 state.update(self.investment.answer(route["query"], market_context=market))
                 answer = state["answer"]
                 context = {"investment": True, "query": route["query"][:1500], "security": security, "market": route["market"]}
             else:
                 state["knowledge_query"] = resolution.knowledge
-                state = (self.graph or query_app).invoke(state)
+                graph = self.graph if self.graph is not None else (self.graph_factory() if self.graph_factory else query_app)
+                state = graph.invoke(state)
                 answer = state.get("answer") or "未找到可用的回答，请补充问题后重试。"
         except Exception:
             # 不记录异常原文或 traceback，连接异常可能带有 URL/凭据。
@@ -104,9 +109,9 @@ class QueryService:
         answer = finalize_answer(answer, citation_ids)
         user_saved = save_chat_message(session_id, "user", safe_query,
                           rewritten_query=state.get("rewritten_query", ""),
-                          item_names=state.get("item_names", []), query_context=context)
+                          item_names=state.get("item_names", []), query_context=context, collection=self.history)
         saved = save_chat_message(session_id, "assistant", answer,
-                                  item_names=state.get("item_names", []), citation_ids=citation_ids)
+                                  item_names=state.get("item_names", []), citation_ids=citation_ids, collection=self.history)
         if not saved or not user_saved:
             error = error or "回答已生成，但会话历史保存失败，请稍后重试。"
         set_task_result(task_id, "answer", answer)
@@ -136,7 +141,7 @@ class QueryService:
 
     def get_history(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """读取某个会话最近的历史消息（按时间正序）"""
-        records = get_recent_messages(session_id, limit=limit)
+        records = get_recent_messages(session_id, limit=limit, collection=self.history)
 
         return [
             {
@@ -152,4 +157,4 @@ class QueryService:
 
     def clear_history(self, session_id: str) -> int:
         """清空某个会话的全部历史消息，返回删除数量"""
-        return clear_history(session_id)
+        return clear_history(session_id, collection=self.history)

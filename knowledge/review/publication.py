@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from knowledge.review.text import ReviewTextError, prepare_review_text
+
 LEASE = timedelta(seconds=180)
 COOLDOWN = timedelta(seconds=30)
 ATTEMPT_WINDOW = timedelta(minutes=10)
@@ -38,4 +40,8 @@ def index_state(document, now):
     if attempts >= MAX_ATTEMPTS:
         retry = max(retry or now, window + ATTEMPT_WINDOW)
     eligible = status not in {"completed", "processing"} and not leased and (retry is None or retry <= now)
+    try:
+        prepare_review_text(document.get("original_text"))
+    except ReviewTextError:
+        return IndexState("invalid_text", None, False, attempts, window)
     return IndexState(status, retry, eligible, attempts, window)

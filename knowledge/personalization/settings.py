@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
@@ -105,9 +104,8 @@ class SettingsRepository:
 
 
 def get_settings_repository():
-    from knowledge.utils.clients.storage_clients import StorageClients
-    database = StorageClients.get_mongo_client()[os.getenv("MONGO_DB_NAME", "kb001")]
-    return SettingsRepository(database.investor_settings, database.strategy_documents)
+    from knowledge.runtime import default_runtime
+    return default_runtime().settings
 
 
 def current_settings():

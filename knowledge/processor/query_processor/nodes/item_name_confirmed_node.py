@@ -17,9 +17,10 @@ from knowledge.utils.mongo_history_util import get_recent_messages
 
 
 class _ItemNameAligner:
-    def __init__(self, logger: Logger, config: QueryConfig):
+    def __init__(self, logger: Logger, config: QueryConfig, client_factory=None):
         self._logger = logger
         self._config = config
+        self.client_factory = client_factory
 
     def search_and_align(self, item_names: List[str]) -> Tuple[List[str], List[str]]:
         # 0. 如果LLM没有提取到商品名，直接返回空结果
@@ -72,7 +73,7 @@ class _ItemNameAligner:
 
         # 创建milvus_client对象
         try:
-            milvus_client = StorageClients.get_milvus_client()
+            milvus_client = (self.client_factory or StorageClients.get_milvus_client)()
         except Exception as e:
             self._logger.error("获取milvus客户端失败")
             return final_search_result
@@ -289,10 +290,11 @@ class _ItemNameExtractor:
 class ItemNameConfirmedNode(BaseNode):
     name = "item_name_confirmed_node"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config=None, *, client_factory=None, history=None):
+        super().__init__(config)
+        self.history = history
         self._extractor = _ItemNameExtractor(self.logger, self.name)
-        self._item_name_aligner = _ItemNameAligner(self.logger, self.config)
+        self._item_name_aligner = _ItemNameAligner(self.logger, self.config, client_factory)
 
     def process(self, state: QueryGraphState) -> QueryGraphState:
         """
@@ -322,7 +324,7 @@ class ItemNameConfirmedNode(BaseNode):
         if state.get("knowledge_query"):
             state["rewritten_query"] = state["original_query"]
             state["item_names"] = []
-            state["history"] = get_recent_messages(state.get("session_id", ""))
+            state["history"] = get_recent_messages(state.get("session_id", ""), collection=self.history)
             return state
         # 1. 获取用户原始问题
         original_query = state["original_query"]
@@ -331,7 +333,7 @@ class ItemNameConfirmedNode(BaseNode):
         session_id = state.get("session_id", "")
         # 获取历史会话结果
         history_messages = get_recent_messages(
-            session_id=session_id
+            session_id=session_id, collection=self.history
         )
 
         state["history"] = history_messages

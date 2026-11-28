@@ -60,7 +60,7 @@ class MemoryVectors(ReviewVectors):
 
 @pytest.fixture
 def setup_indexing(monkeypatch):
-    monkeypatch.setattr("knowledge.api.review_api.MongoClient", Mock(side_effect=AssertionError("禁止连接真实 MongoDB")))
+    monkeypatch.setattr("pymongo.MongoClient", Mock(side_effect=AssertionError("禁止连接真实 MongoDB")))
     collection = mongomock.MongoClient(tz_aware=True).index_tests.trade_reviews
     repository = ReviewRepository(collection)
     vectors = MemoryVectors()
@@ -282,6 +282,60 @@ def test_oversized_condition_chunks_require_full_source_context(setup_indexing):
     originals = [row["content"] for row in rows if row["title"] == "复盘原文"]
     assert "".join(text.split("\n", 1)[1] for text in originals) == original
     assert all("仅片段，须核对全文前提" in text for text in originals)
+
+
+@pytest.mark.parametrize("edit", [False, True])
+def test_redacted_limit_can_be_saved_indexed_and_quoted_in_full(setup_indexing, edit):
+    components = setup_indexing
+    extractor = Mock()
+    extractor.extract.return_value = EXTRACTION
+    service = ReviewService(components.repository, extractor, components.indexer)
+    tail = '只有所有前提满足才考虑买入，今天未成交。'
+    raw = '持仓金额0。' + '甲' * (9994 - len('持仓金额0。') - len(tail)) + tail
+    safe = redact_text(raw)
+    assert len(raw) == 9994 and len(safe) == 10000
+    if edit:
+        old = service.save(TEXT, uuid4())
+        result = service.edit(old['id'], raw, 1, uuid4())
+    else:
+        result = service.save(raw, uuid4())
+    assert result['original_text'] == safe and result['index_status'] == 'completed'
+    document, rows = assert_published(components, result['id'])
+    components.vectors.client.hybrid_search.return_value = [[
+        {'id': row['id'], 'distance': 1.0, 'entity': row} for row in rows]]
+    hits = components.indexer.search([1.0, 0.0], {1: 1.0}, DEFAULT_OWNER)
+    assert hits and all(hit['content'].endswith(safe) for hit in hits)
+    assert all(tail in hit['content'] for hit in hits)
+
+
+@pytest.mark.parametrize("published", [False, True])
+def test_legacy_expanded_record_remains_readable_and_can_be_corrected(setup_indexing, published):
+    components = setup_indexing
+    legacy = redact_text('甲' * 9995 + '持仓金额0')
+    assert len(legacy) == 10006
+    identifier = create_review(components, legacy)
+    if published:
+        components.collection.update_one({'_id': identifier}, {'$set': {
+            'index_status': 'completed', 'index_version': 'legacy-version', 'index_manifest': {'legacy': 'hash'}}})
+    extractor = Mock()
+    extractor.extract.return_value = EXTRACTION
+    service = ReviewService(components.repository, extractor, components.indexer)
+    assert service.get(identifier)['original_text'] == legacy
+    assert service.get(identifier)['index_status'] == 'invalid_text'
+    assert service.recent(20)[0]['original_text'] == legacy
+    assert components.repository.get(identifier, DEFAULT_OWNER)['original_text'] == legacy
+    rejected = service.reindex(identifier)
+    assert rejected['index_status'] == 'invalid_text' and rejected['index_can_retry'] is False
+    assert '编辑原文' in rejected['warning']
+    assert not components.vectors.rows and not components.embedded_texts
+    assert rejected['original_text'] == legacy
+    corrected = service.edit(identifier, TEXT, 1, uuid4())
+    assert corrected['revision'] == 2 and corrected['original_text'] == TEXT
+    document, rows = assert_published(components, identifier)
+    components.vectors.client.hybrid_search.return_value = [[
+        {'id': row['id'], 'distance': 1.0, 'entity': row} for row in rows]]
+    hits = components.indexer.search([1.0, 0.0], {1: 1.0}, DEFAULT_OWNER)
+    assert hits and all(hit['content'].endswith(TEXT) for hit in hits)
 
 
 def test_summary_preserves_whole_planned_unknown_and_conflicting_events():

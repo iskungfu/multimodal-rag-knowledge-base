@@ -5,6 +5,7 @@ from pymongo.errors import PyMongoError
 from knowledge.review.extraction import ExtractionUnavailable, ReviewExtractor
 from knowledge.review.indexing import ReviewIndexer
 from knowledge.review.privacy import redact_text, redact_value
+from knowledge.review.text import prepare_review_text
 
 DEFAULT_OWNER = "default_user"
 from knowledge.utils.answer_policy import DISCLAIMER
@@ -27,14 +28,14 @@ class ReviewService:
         return result
 
     def save(self, text, request_id):
-        safe_text = redact_text(text)
+        safe_text = prepare_review_text(text)
         document, created = self.repository.create(str(request_id), DEFAULT_OWNER, safe_text)
         if created:
             return self.extract_saved(document)
         return self.present(document)
 
     def edit(self, review_id, text, revision, request_id):
-        document, changed = self.repository.edit(str(review_id), DEFAULT_OWNER, redact_text(text),
+        document, changed = self.repository.edit(str(review_id), DEFAULT_OWNER, prepare_review_text(text),
                                                  revision, str(request_id))
         if document is None:
             return None

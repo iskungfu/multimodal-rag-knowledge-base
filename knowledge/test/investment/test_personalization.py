@@ -122,9 +122,18 @@ def test_assistant_reads_new_mode_each_turn_and_does_not_change_risk(settings):
     assert retriever.retrieve.call_args.kwargs['document_ids'] == []
 
 
-def test_profile_failure_never_silently_reverts_to_all_strategies():
+@pytest.mark.parametrize('failure_kind', ['read', 'invalid_mode'])
+def test_profile_failure_never_silently_reverts_to_all_strategies(failure_kind):
     retriever = Mock()
-    assistant = InvestmentAssistant(retriever, settings=Mock(side_effect=RuntimeError('unavailable')))
-    with pytest.raises(RuntimeError):
-        assistant.answer('我的策略')
-    retriever.retrieve.assert_not_called()
+    retriever.retrieve.return_value = {kind: {'status': 'empty', 'items': []}
+                                     for kind in ('knowledge', 'review')}
+    settings = (Mock(side_effect=RuntimeError('unavailable')) if failure_kind == 'read'
+                else Mock(return_value={'active_mode_id': str(uuid4()), 'modes': []}))
+    assistant = InvestmentAssistant(retriever, settings=settings)
+    result = assistant.answer('我的策略', [{'id': 'stock:000001', 'text': '高风险，2026-11-27，来源测试'}])
+    assert result['personalization_status'] == 'unavailable'
+    assert result['routes']['personal'] == {'status': 'failed', 'items': []}
+    assert retriever.retrieve.call_args.kwargs == {'document_ids': [], 'kinds': ('knowledge', 'review')}
+    assert '高风险，2026-11-27，来源测试' in result['answer']
+    assert '用户档案暂不可用' in result['answer']
+    assert 'unavailable' not in result['answer']

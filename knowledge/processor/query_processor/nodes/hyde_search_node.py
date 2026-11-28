@@ -15,6 +15,10 @@ from knowledge.utils.milvus_util import _item_names_filter, create_hybrid_search
 class HydeSearchNode(BaseNode):
     name = "hyde_search_node"
 
+    def __init__(self, config=None, *, client_factory=None):
+        super().__init__(config)
+        self.client_factory = client_factory
+
     def process(self, state: QueryGraphState) -> Dict[str, Any]:
         # 1. 参数校验
         rewritten_query, item_names = self._validate_state(state)
@@ -30,7 +34,7 @@ class HydeSearchNode(BaseNode):
             raise EmbeddingError(node_name=self.name, message=f"获取嵌入模型对象失败,{e}")
 
         try:
-            milvus_client = StorageClients.get_milvus_client()
+            milvus_client = (self.client_factory or StorageClients.get_milvus_client)()
         except Exception as e:
             self.logger.error("获取milvus客户端对象失败")
             raise MilvusError(node_name=self.name, message=f"获取milvus客户端对象失败,{e}")

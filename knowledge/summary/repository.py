@@ -31,7 +31,8 @@ class SummaryRepository:
 
     def expire(self, owner, now):
         self.collection.update_many({"owner_id": owner, "status": "processing", "lease_until": {"$lte": now}}, {
-            "$set": {"status": "failed", "error": "生成超时或进程中断，请手动重试", "updated_at": now},
+            "$set": {"status": "failed", "error": "生成超时或进程中断，请手动重试",
+                     "error_code": "lease_expired", "updated_at": now},
             "$unset": {"token": "", "lease_until": ""},
         })
 
@@ -47,12 +48,14 @@ class SummaryRepository:
         allowed = ["pending", "failed"] + (["completed"] if retry else [])
         return self.collection.find_one_and_update({**key, "status": {"$in": allowed}}, {
             "$set": {"status": "processing", "token": uuid4().hex,
-                     "lease_until": now + timedelta(seconds=LEASE_SECONDS), "updated_at": now, "error": None},
+                     "lease_until": now + timedelta(seconds=LEASE_SECONDS), "updated_at": now,
+                     "error": None, "error_code": None},
             "$inc": {"attempts": 1},
         }, return_document=ReturnDocument.AFTER)
 
-    def finish(self, claim, now, result=None, error=None):
-        fields = {"status": "failed" if error else "completed", "updated_at": now, "error": error}
+    def finish(self, claim, now, result=None, error=None, *, error_code=None):
+        fields = {"status": "failed" if error else "completed", "updated_at": now, "error": error,
+                  "error_code": error_code if error else None}
         if result is not None:
             fields.update(result=protect_result(result), generated_at=now)
         return self.collection.update_one({"_id": claim["_id"], "owner_id": claim["owner_id"],

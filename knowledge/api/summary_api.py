@@ -1,20 +1,16 @@
 """固定 default_user 的摘要与关注列表 API。"""
-import os
-import threading
 from datetime import date as calendar_date
-from functools import cache
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from knowledge.market.models import SHANGHAI, market_symbol
-from knowledge.service.summary_service import SummaryBusy, SummaryService
+from knowledge.service.summary_service import SummaryBusy
 from knowledge.summary.repository import SummaryInputError
 
 router = APIRouter(tags=["daily-summaries"])
-_summary_service_lock = threading.Lock()
 
 
 class GenerateRequest(BaseModel):
@@ -40,37 +36,11 @@ async def summary_validation_error(request, exc):
     return await request_validation_exception_handler(request, exc)
 
 
-def get_summary_service():
-    with _summary_service_lock:
-        return _create_summary_service()
-
-
-@cache
-def _create_summary_service():
-    mongo = None
+def get_summary_service(request: Request = None):
+    from knowledge.runtime import runtime_for
     try:
-        from pymongo import MongoClient
-        from knowledge.market.repository import MarketQuoteRepository
-        from knowledge.service.market_service import MarketService
-        from knowledge.summary.indices import IndexRepository, IndexService
-        from knowledge.summary.repository import SummaryRepository, WatchlistRepository
-        from knowledge.summary.strategies import PersonalStrategyRetriever
-        from knowledge.summary.knowledge import PublicKnowledgeRetriever
-        from knowledge.personalization.settings import SettingsRepository
-        mongo = MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000,
-                            connectTimeoutMS=5000, socketTimeoutMS=5000, tz_aware=True)
-        db = mongo[os.getenv("MONGO_DB_NAME", "kb001")]
-        service = SummaryService(SummaryRepository(db.daily_summaries), WatchlistRepository(db.watchlists),
-                                 IndexService(IndexRepository(db.index_quotes)),
-                                 MarketService(MarketQuoteRepository(db.market_quotes)),
-                                 PersonalStrategyRetriever(db.strategy_documents),
-                                 knowledge=PublicKnowledgeRetriever(),
-                                 settings=SettingsRepository(db.investor_settings, db.strategy_documents).read)
-        service.mongo_client = mongo
-        return service
+        return runtime_for(request).summary
     except Exception:
-        if mongo is not None:
-            mongo.close()
         raise HTTPException(503, "摘要存储暂不可用，请稍后重试") from None
 
 

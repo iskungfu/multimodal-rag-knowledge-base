@@ -1,29 +1,21 @@
 """查询服务的收盘行情路由；同步函数由 FastAPI 放入线程池。"""
 
-import os
 from datetime import date
-from functools import cache
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pymongo.errors import PyMongoError
 
 from knowledge.market.models import MarketUnavailable
-from knowledge.market.repository import MarketQuoteRepository
 from knowledge.service.market_service import MarketService
 
 router = APIRouter(prefix="/market/quotes", tags=["market"])
 
 
-@cache
-def get_market_service():
-    # 延迟使用已有 MongoDB 客户端，不依赖模型加载或连接其他存储。
-    from knowledge.utils.clients.storage_clients import StorageClients
-
+def get_market_service(request: Request = None):
+    from knowledge.runtime import runtime_for
     try:
-        client = StorageClients.get_mongo_client()
-        repository = MarketQuoteRepository(client[os.getenv("MONGO_DB_NAME", "kb001")]["market_quotes"])
-        return MarketService(repository)
-    except (PyMongoError, EnvironmentError, ConnectionError):
+        return runtime_for(request).market
+    except Exception:
         raise HTTPException(503, "行情存储暂不可用") from None
 
 

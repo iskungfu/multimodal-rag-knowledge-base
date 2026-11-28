@@ -7,7 +7,8 @@ from pathlib import Path
 import sys
 import threading
 import uuid
-from datetime import date, datetime, timedelta, time
+from datetime import datetime, timedelta, time
+from dataclasses import replace
 from time import monotonic
 from types import SimpleNamespace
 
@@ -26,20 +27,10 @@ def main():
     if args.host:
         from dotenv import load_dotenv
         load_dotenv(ROOT / 'knowledge/.env')
-    os.environ.update(DAILY_SUMMARY_ENABLED='0', MARKET_COLLECTION_ENABLED='0', HF_HUB_OFFLINE='1')
-    db_name = os.getenv('AFK_TEST_DB_NAME')
-    if not db_name or db_name in {os.getenv('MONGO_DB_NAME'), 'kb001', 'admin', 'local', 'config'}:
-        print('必须提供独立 AFK_TEST_DB_NAME。')
-        return 1
+    os.environ['HF_HUB_OFFLINE'] = '1'
     prefix = 'summary_accept_' + uuid.uuid4().hex[:16]
-    os.environ.update(MONGO_DB_NAME=db_name, STRATEGY_COLLECTION=prefix + '_empty_personal',
-                      REVIEW_COLLECTION=prefix + '_empty_review', CHUNKS_COLLECTION=prefix + '_empty_knowledge')
-    vector_collection = prefix + '_vectors'
     report = {'mode': 'host' if args.host else 'storage', 'checks': {}, 'cleanup': {}, 'passed': False}
-    mongo = milvus = None
-    resources = []
-    vector_created = False
-    restore_history = None
+    runtime = None
 
     def check(name, result):
         report['checks'][name] = bool(result)
@@ -48,58 +39,46 @@ def main():
             raise AssertionError(name)
 
     try:
-        from pymongo import MongoClient
-        from pymilvus import MilvusClient
-        from fastapi import FastAPI
         from fastapi.testclient import TestClient
-        from knowledge.summary.repository import SummaryRepository, WatchlistRepository
-        from knowledge.summary.indices import IndexService, IndexRepository, EastmoneyIndexAdapter
-        from knowledge.summary.strategies import PersonalStrategyRetriever
-        from knowledge.summary.scheduler import summary_lifespan, build_scheduler
-        from knowledge.service.summary_service import SummaryService
-        from knowledge.service.market_service import MarketService
-        from knowledge.market.repository import MarketQuoteRepository
+        from knowledge.api.query_api import create_app
+        from knowledge.runtime import QueryRuntime, RuntimeConfig
+        from knowledge.summary.indices import EastmoneyIndexAdapter
+        from knowledge.summary.scheduler import build_scheduler
+        from knowledge.summary.strategies import model_error_code
         from knowledge.market.models import SHANGHAI, date_window
         from knowledge.market.calendar import TradingCalendar
-        from knowledge.strategy.vectors import StrategyVectors
-        from knowledge.strategy.repository import StrategyRepository
-        from knowledge.api.summary_api import router, get_summary_service
         from knowledge.utils.answer_policy import DISCLAIMER
-        mongo = MongoClient(os.environ['MONGO_URL'], serverSelectionTimeoutMS=5000, socketTimeoutMS=5000, tz_aware=True)
-        db = mongo[db_name]
-        def collection(suffix):
-            value = db[prefix + '_' + suffix]
-            resources.append(value)
-            return value
-        documents = collection('documents')
-        summaries, watches = collection('summaries'), collection('watches')
-        index_quotes, stock_quotes = collection('indices'), collection('stocks')
-        milvus = MilvusClient(uri=os.environ['MILVUS_URL'], timeout=15)
+        config = RuntimeConfig.acceptance('summary', prefix, vector_dimension=1024 if args.host else 2)
+        if not args.host:
+            config = replace(config, features=frozenset({'summary'}))
+        runtime = QueryRuntime(config)
+        summaries = runtime.collection('summaries')
+        milvus = runtime.milvus
+        vector_collection = config.vector_names['personal']
         check('unique_vector_collection', not milvus.has_collection(vector_collection))
-        vectors = StrategyVectors(milvus, vector_collection, 1024 if args.host else 2)
-        vector_created = True
+        vectors = runtime.vectors('personal')
         vectors.prepare()
-        doc_repo = StrategyRepository(documents)
+        strategy = runtime.strategy
+        doc_repo = strategy.repository
+        service = runtime.summary
+        # 此入口只验收个人策略摘要；公共知识和档案由投资助手入口另行验收。
+        service.knowledge = service.settings = None
+        retriever = service.strategies
+        app = create_app(summary_enabled=False, runtime=runtime)
         content = ('# 仅在熊市时适用\n## 自建摘要验收策略\n\n若单只股票风险偏高，先检查自己设定的仓位上限，避免连续追高。'
                    '若处于熊市才轻仓；当前市场阶段未知时不能认为此前提已满足。'
                    '仅在人工核实策略前提后决定是否采用。验收短语：青鹭7391。')
         if args.host:
             from knowledge.service.strategy_service import StrategyService
-            from knowledge.api.strategy_api import router as strategy_router, get_strategy_service
-            strategy = StrategyService(doc_repo, vectors)
-            importer = FastAPI()
-            importer.include_router(strategy_router)
-            importer.dependency_overrides[get_strategy_service] = lambda: strategy
-            with TestClient(importer) as api:
+            with TestClient(app) as api:
                 response = api.post('/strategies/text', json={'title': '摘要验收策略', 'text': content})
                 check('real_import_api', response.status_code == 202)
                 document_id = response.json()['task_id']
                 check('real_import_graph_bge', api.get('/strategies/' + document_id).json()['status'] == 'completed')
-            other = StrategyService(doc_repo, vectors, owner_id='other_user')
+            other = StrategyService(doc_repo, vectors, owner_id='other_user', register_task=runtime.register_task)
             state = other.stage('别人的策略：禁止出现紫鹭8642。'.encode(), 'other.md')
             other.run(state)
             check('other_owner_import', other.get(state['task_id'])['status'] == 'completed')
-            retriever = PersonalStrategyRetriever(documents, vectors)
         else:
             document_id = 'synthetic-daily-strategy'
             chunks = [{'text': content, 'title': '自建摘要验收策略', 'file_title': 'test',
@@ -108,16 +87,13 @@ def main():
                 doc_repo.create(doc, owner, '测试策略', 'test.md')
                 vectors.insert(chunks, owner, doc)
                 doc_repo.finish(doc, owner, 'completed', chunk_count=1)
-            retriever = PersonalStrategyRetriever(documents, vectors, lambda _: {'dense': [[1., 0.]], 'sparse': [{1: 1.}]})
+            retriever.embed = lambda _: {'dense': [[1., 0.]], 'sparse': [{1: 1.}]}
         milvus.flush(vector_collection, timeout=30)
         retrieved = retriever.retrieve('default_user', '收盘后如何控制风险和遵守策略条件？')
         check('personal_recall', retrieved['status'] == 'retrieved' and any('青鹭7391' in row['content'] for row in retrieved['items']))
         check('owner_and_citation', all(row['owner_id'] == 'default_user' and row['document_id'] == document_id and row['chunk_id']
                                         and '紫鹭8642' not in row['content'] for row in retrieved['items']))
         check('unknown_owner_empty', retriever.retrieve('missing_user', '风险')['status'] == 'empty')
-        market = MarketService(MarketQuoteRepository(stock_quotes))
-        indices = IndexService(IndexRepository(index_quotes))
-        service = SummaryService(SummaryRepository(summaries), WatchlistRepository(watches), indices, market, retriever)
         original_select = service.model.select
         def observed_select(items, evidence):
             started = monotonic()
@@ -128,7 +104,7 @@ def main():
                 call['status'] = 'completed'
                 return result
             except Exception as exc:
-                call.update(status='failed', error_type=type(exc).__name__)
+                call.update(status='failed', error_type=type(exc).__name__, error_code=model_error_code(exc))
                 raise
             finally:
                 call['seconds'] = round(monotonic() - started, 2)
@@ -138,36 +114,11 @@ def main():
         _, end = date_window(None, None, now)
         rows = EastmoneyIndexAdapter().fetch_daily('sh000001', end-timedelta(days=120), end, now)
         day = rows[-1].date
-        if args.host:
-            from knowledge.api.query_api import create_app
-            from knowledge.api.market_api import get_market_service
-            from knowledge.api.review_api import get_review_service
-            from knowledge.review.repository import ReviewRepository
-            from knowledge.service.review_service import ReviewService
-            from knowledge.core.deps import get_query_service
-            from knowledge.service.query_service import QueryService
-            from knowledge.service.risk_service import RiskService
-            from knowledge.utils import mongo_history_util
-            from knowledge.api.strategy_api import router as strategy_router, get_strategy_service
-            app = create_app(summary_enabled=False)
-            app.include_router(strategy_router)
-            app.dependency_overrides[get_strategy_service] = lambda: strategy
-            history = collection('history')
-            restore_history = mongo_history_util._get_collection
-            mongo_history_util._get_collection = lambda: history
-            app.dependency_overrides[get_market_service] = lambda: market
-            app.dependency_overrides[get_query_service] = lambda: QueryService(risk=RiskService(lambda: market))
-            reviews = ReviewService(ReviewRepository(collection('reviews')))
-            app.dependency_overrides[get_review_service] = lambda: reviews
-        else:
-            app = FastAPI(lifespan=summary_lifespan(False))
-            app.include_router(router)
-        app.dependency_overrides[get_summary_service] = lambda: service
         with TestClient(app) as api:
             check('manual_generate_accepted', api.post('/daily-summaries/generate', json={'date': str(day)}).status_code == 202)
             record = api.get('/daily-summaries/' + str(day)).json()
             report['manual'] = {'status': record.get('status'), 'attempts': record.get('attempts'),
-                                'error': record.get('error')}
+                                'error': record.get('error'), 'error_code': record.get('error_code')}
             check('summary_completed', record['status'] == 'completed')
             answer = record['result']['answer']
             check('real_strategy_in_summary', bool(record['result']['strategies']) and '青鹭7391' in answer and '紫鹭8642' not in answer)
@@ -188,6 +139,7 @@ def main():
         report['scheduler_calendar'] = calendar_status
         check('scheduler_target_trading_day', calendar_status['is_trading_day'] is True)
         scheduler = build_scheduler(lambda: service, calendar_factory=lambda: SimpleNamespace(status=lambda: calendar_status))
+        runtime.track_scheduler(scheduler)
         event = threading.Event()
         from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
         scheduler.add_listener(lambda result: event.set() if result.job_id == 'accept-once' else None,
@@ -198,7 +150,8 @@ def main():
             finished = event.wait(270)
             scheduled = summaries.find_one() or {}
             report['scheduler'] = {'event_received': finished, 'status': scheduled.get('status'),
-                                   'attempts': scheduled.get('attempts'), 'error': scheduled.get('error')}
+                                   'attempts': scheduled.get('attempts'), 'error': scheduled.get('error'),
+                                   'error_code': scheduled.get('error_code')}
             check('actual_scheduler_executor', finished and summaries.count_documents({}) == 1 and
                   scheduled.get('status') == 'completed' and scheduled.get('attempts') == 2)
         finally:
@@ -213,25 +166,9 @@ def main():
         report['error_type'] = type(exc).__name__
         print('验收失败，异常详情已隐藏；类型：' + type(exc).__name__, flush=True)
     finally:
-        if restore_history:
-            from knowledge.utils import mongo_history_util
-            mongo_history_util._get_collection = restore_history
-        if milvus:
-            try:
-                if vector_created and milvus.has_collection(vector_collection):
-                    milvus.drop_collection(vector_collection, timeout=30)
-                report['cleanup']['milvus'] = not milvus.has_collection(vector_collection)
-            except Exception:
-                report['cleanup']['milvus'] = False
-            milvus.close()
-        if mongo:
-            try:
-                for value in resources:
-                    value.drop()
-                report['cleanup']['mongodb'] = not any(name.startswith(prefix) for name in mongo[db_name].list_collection_names())
-            except Exception:
-                report['cleanup']['mongodb'] = False
-            mongo.close()
+        if runtime is not None:
+            report['resources'] = runtime.manifest()
+            report['cleanup'] = runtime.close()
         report['passed'] = report['passed'] and all(report['cleanup'].values())
         folder = ROOT / '.sandcastle/logs'
         folder.mkdir(parents=True, exist_ok=True)

@@ -21,6 +21,7 @@ class InvestmentState(TypedDict, total=False):
     selection_error: str
     answer: str
     personalization: dict
+    personalization_status: str
     retrieval_query: str
 
 
@@ -44,9 +45,17 @@ class InvestmentAssistant:
 
     def _retrieve(self, state):
         try:
-            identifiers = state.get("personalization", {}).get("document_ids")
-            options = {"document_ids": identifiers} if identifiers is not None else {}
-            routes = self.retriever.retrieve(state["retrieval_query"], **options)
+            if state.get("personalization_status") == "unavailable":
+                # 档案失败时无法核实当前模式，个人策略必须关闭；其他资料仍可独立读取。
+                independent = self.retriever.retrieve(state["retrieval_query"], document_ids=[],
+                                                      kinds=("knowledge", "review"))
+                routes = {kind: independent.get(kind, {"status": "failed", "items": []})
+                          for kind in ("knowledge", "review")}
+                routes["personal"] = {"status": "failed", "items": []}
+            else:
+                identifiers = state.get("personalization", {}).get("document_ids")
+                options = {"document_ids": identifiers} if identifiers is not None else {}
+                routes = self.retriever.retrieve(state["retrieval_query"], **options)
         except Exception:
             routes = {kind: {"status": "failed", "items": []} for kind in ("personal", "knowledge", "review")}
         return {"routes": routes}
@@ -74,15 +83,25 @@ class InvestmentAssistant:
                 status = "failed"
                 error = type(failure).__name__
         answer = render_answer(documents, state["market"], state["routes"], status, state["rerank_status"])
-        if state.get("personalization"):
+        if state.get("personalization_status") == "unavailable":
+            answer = finalize_answer("用户档案暂不可用，未读取个人策略；未扩大策略范围。\n\n" + answer,
+                                     [document["chunk_id"] for document in documents])
+        elif state.get("personalization"):
             answer = finalize_answer(evidence_text(state["personalization"]["text"]) + "\n\n" + answer,
                                      [document["chunk_id"] for document in documents])
         return {"answer": answer, "selection_status": status, "selection_error": error, "reranked_docs": documents}
 
     def answer(self, query, market_context=None) -> dict[str, Any]:
         market = [{"id": str(item["id"]), "text": redact_text(item["text"])} for item in (market_context or [])]
-        context = settings_context(self.settings()) if self.settings is not None else {}
+        context, status = {}, "unconfigured"
+        if self.settings is not None:
+            try:
+                context = settings_context(self.settings())
+                status = "available"
+            except Exception:
+                status = "unavailable"
         safe_query = redact_text(query)
         retrieval_query = safe_query + ("\n用户档案资料：\n" + context["text"] if context else "")
         return self.graph.invoke({"query": safe_query, "market": market,
-                                  "retrieval_query": retrieval_query, "personalization": context})
+                                  "retrieval_query": retrieval_query, "personalization": context,
+                                  "personalization_status": status})

@@ -1,4 +1,5 @@
 """收盘摘要用确定性行情风险 + 有引用的条件式策略清单。"""
+import logging
 import threading
 import time as clock
 from datetime import datetime, time, timedelta, timezone
@@ -8,11 +9,12 @@ from knowledge.risk.symbols import Security, SymbolResolver
 from knowledge.service.risk_service import RiskService
 from knowledge.summary.indices import INDICES, N, evaluate_index, rule_note
 from knowledge.summary.repository import protect_result, SummaryInputError
-from knowledge.summary.strategies import StrategyChecklistModel
+from knowledge.summary.strategies import ChecklistError, StrategyChecklistModel, model_error_code
 from knowledge.investment.generation import EvidenceSelector, evidence_text, validate_selections
 from knowledge.personalization.settings import settings_context
 
 OWNER = "default_user"
+logger = logging.getLogger(__name__)
 
 
 def market_evidence(assessments, stocks):
@@ -85,10 +87,12 @@ class SummaryService:
         day = date.fromisoformat(claim["date"])
         started = clock.monotonic()
         error = "摘要生成失败，请稍后重试"
+        stage = "summary"
 
-        def fail(message):
+        def fail(message, code):
+            logger.warning("summary_failed code=%s", code)
             try:
-                self.repository.finish(claim, self.now(), error=message)
+                self.repository.finish(claim, self.now(), error=message, error_code=code)
             except Exception:
                 pass
 
@@ -98,8 +102,10 @@ class SummaryService:
                     raise TimeoutError
             warnings, assessments = [], []
             error = "用户档案读取失败，未扩大个人策略范围；请稍后重试"
+            stage = "profile"
             context = settings_context(self.settings()) if self.settings is not None else {}
             error = "摘要生成失败，请稍后重试"
+            stage = "market"
             start = day - timedelta(days=120)
             for symbol in INDICES:
                 check_budget()
@@ -118,6 +124,7 @@ class SummaryService:
                 warnings.append("尚未配置关注股票；关注列表不代表实际持仓")
             check_budget()
             error = "个人策略检索失败，未编造策略；请检查策略库后重试"
+            stage = "strategy_retrieval"
             evidence = market_evidence(assessments, stocks)
             retrieval_query = "收盘复核：结合以下风险与缺失信息，检索相关的个人风险控制、仓位约束及交易纪律。\n"
             retrieval_query += "\n".join(item["text"].split("\n\n")[0] for item in evidence)
@@ -129,15 +136,17 @@ class SummaryService:
             strategies = []
             if retrieved["status"] == "retrieved":
                 error = "策略模型调用或依据校验失败，未发布新摘要；请重试"
+                stage = "strategy_model"
                 selection_options = {"profile_context": context} if context else {}
                 strategies = self.model.select(retrieved["items"], evidence, **selection_options)
                 if not strategies:
-                    raise ValueError
+                    raise ChecklistError("model_empty_selection")
             elif retrieved["status"] == "empty":
                 warnings.append("尚无已完成导入的个人策略，本摘要没有个性化操作提示")
             else:
                 warnings.append("已导入策略但未检索到足够片段，本摘要没有个性化操作提示")
             check_budget()
+            stage = "summary"
             knowledge, knowledge_status = [], "unconfigured"
             if self.knowledge is not None:
                 try:
@@ -195,13 +204,15 @@ class SummaryService:
                                      "personalization": context,
                                      "warnings": list(dict.fromkeys(warnings)), "answer": "\n\n".join(lines)})
             error = "摘要保存失败，请稍后重试"
+            stage = "storage"
             self.repository.finish(claim, self.now(), result=result)
         except MarketUnavailable:
-            fail("双指数目标日收盘数据未核实，可能休市、延迟或源不可用；请稍后重试")
+            fail("双指数目标日收盘数据未核实，可能休市、延迟或源不可用；请稍后重试", "market_unavailable")
         except TimeoutError:
-            fail("摘要生成超过时间预算，请重试")
-        except Exception:
-            fail(error)
+            fail("摘要生成超过时间预算，请重试", "summary_timeout")
+        except Exception as failure:
+            code = model_error_code(failure) if stage == "strategy_model" else stage + "_unavailable"
+            fail(error, code)
         finally:
             self.slot.release()
 

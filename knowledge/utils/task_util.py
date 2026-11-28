@@ -18,6 +18,12 @@ _tasks_result: Dict[str, Dict[str, str]] = defaultdict(dict)
 
 _tasks_status: Dict[str, str] = {}
 
+
+def forget_task(task_id: str):
+    """只释放退出运行登记的任务；不清空其他应用/导入任务的状态。"""
+    for records in (_tasks_running_list, _tasks_done_list, _tasks_duration, _tasks_result, _tasks_status):
+        records.pop(task_id, None)
+
 TASK_STATUS_PROCESSING = "processing"  # 任务处理中
 TASK_STATUS_COMPLETED = "completed"  # 任务完成
 TASK_STATUS_FAILED = "failed"  # 任务失败

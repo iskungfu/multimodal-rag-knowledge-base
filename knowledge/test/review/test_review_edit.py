@@ -93,4 +93,30 @@ def test_edit_validation_does_not_echo_sensitive_input(records, changes):
     response = client.put('/reviews/' + original['id'], json={
         'text': '计划未成交。', 'revision': 1, 'request_id': str(uuid4()), **changes})
     assert response.status_code == 422 and '13900001234' not in response.text
+
+
+@pytest.mark.parametrize('edit', [False, True])
+def test_redaction_growth_rejected_before_write_or_invalidating_published_index(records, edit):
+    repository, extractor, service, original, client = records
+    now = datetime.now(timezone.utc)
+    claim = repository.claim_index(original['id'], OWNER, now)
+    assert repository.finish_index(claim, now, {'chunk': 'hash'})
+    before = list(repository.collection.find())
+    calls = extractor.extract.call_count
+    raw = '甲' * 9984 + '13900001234持仓金额0'
+    assert len(raw) == 10000
+    payload = {'text': raw, 'request_id': str(uuid4())}
+    response = (client.put('/reviews/' + original['id'], json={**payload, 'revision': 1})
+                if edit else client.post('/reviews', json=payload))
+    assert response.status_code == 422
+    assert '脱敏后' in response.json()['detail'] and '13900001234' not in response.text
+    assert list(repository.collection.find()) == before
+    assert repository.published(original['id'], OWNER, claim['index_token'])
+    assert extractor.extract.call_count == calls
+    with pytest.raises(ValueError, match='脱敏后'):
+        if edit:
+            service.edit(original['id'], raw, 1, uuid4())
+        else:
+            service.save(raw, uuid4())
+    assert list(repository.collection.find()) == before
     assert repository.get(original['id'], OWNER)['revision'] == 1

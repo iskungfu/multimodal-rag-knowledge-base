@@ -5,10 +5,12 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
 
+from knowledge.review.text import MAX_REVIEW_TEXT_LENGTH
+
 
 class ReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    text: str = Field(min_length=1, max_length=10000)
+    text: str = Field(min_length=1, max_length=MAX_REVIEW_TEXT_LENGTH)
     request_id: UUID = Field(default_factory=uuid4)
 
     @field_validator("text")
@@ -31,7 +33,7 @@ class ReviewEvent(BaseModel):
     direction: Literal["buy", "sell"] | None
     price: Annotated[FiniteFloat, Field(gt=0)] | None
     reason: str | None = Field(max_length=2000)
-    evidence: str = Field(min_length=1, max_length=10000)
+    evidence: str = Field(min_length=1, max_length=MAX_REVIEW_TEXT_LENGTH)
     identity_conflict: bool
 
 

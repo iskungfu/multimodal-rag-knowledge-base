@@ -1,14 +1,11 @@
 """导入服务的个人策略入口；客户端不能选择 owner_id 或 doc_type。"""
 
-import os
-from functools import cache
-
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from knowledge.service.strategy_service import StrategyService, StrategyInputError, MAX_UPLOAD_BYTES
+from knowledge.service.strategy_service import StrategyInputError, MAX_UPLOAD_BYTES
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 
@@ -28,23 +25,11 @@ class StrategyTextRequest(BaseModel):
     title: str = Field(default="个人策略", min_length=1, max_length=200)
 
 
-@cache
-def get_strategy_service():
-    mongo = None
+def get_strategy_service(request: Request = None):
+    from knowledge.runtime import runtime_for
     try:
-        from pymongo import MongoClient
-        from pymilvus import MilvusClient
-        from knowledge.strategy.repository import StrategyRepository
-        from knowledge.strategy.vectors import StrategyVectors
-        mongo = MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000,
-                            connectTimeoutMS=5000, socketTimeoutMS=5000, tz_aware=True)
-        repository = StrategyRepository(mongo[os.getenv("MONGO_DB_NAME", "kb001")]["strategy_documents"])
-        vectors = StrategyVectors(MilvusClient(uri=os.environ["MILVUS_URL"]),
-                                  os.getenv("STRATEGY_COLLECTION", "strategy_chunks_v1"))
-        return StrategyService(repository, vectors)
+        return runtime_for(request).strategy
     except Exception:
-        if mongo is not None:
-            mongo.close()
         raise HTTPException(503, "策略存储暂不可用") from None
 
 

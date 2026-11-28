@@ -22,9 +22,10 @@ class StrategyInputError(ValueError):
 
 
 class StrategyService:
-    def __init__(self, repository, vectors, graph=None, owner_id="default_user"):
+    def __init__(self, repository, vectors, graph=None, owner_id="default_user", *, register_task=None):
         self.repository, self.vectors, self.graph = repository, vectors, graph
         self.owner_id = owner_id
+        self.register_task = register_task
 
     def stage(self, data, filename, title=None):
         filename = safe_filename(filename)
@@ -46,6 +47,8 @@ class StrategyService:
             data, suffix = content.encode("utf-8"), ".md"
         title = redact_text((title or Path(filename).stem).strip())[:200] or "个人策略"
         document_id = uuid4().hex
+        if self.register_task is not None:
+            self.register_task(document_id)
         directory = tempfile.mkdtemp(prefix="shopkeeper-strategy-")
         path = Path(directory) / ("input" + suffix)
         try:

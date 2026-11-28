@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock
+from uuid import uuid4
 
 import mongomock
 import pytest
@@ -311,6 +312,55 @@ def test_query_api_three_sources_and_history_contract(streaming, isolated_histor
         assert all(fact in answer for fact in ("青鹭7391", "松柏6284", "白鹭9527", "高风险"))
         assert answer.count(DISCLAIMER) == 1
         assert isolated_history.find_one({"role": "user"})["query_context"]["security"]["code"] == "000001"
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_profile_outage_keeps_independent_evidence_in_query_stream_and_history(streaming, isolated_history):
+    resolver = Mock()
+    resolver.resolve.return_value = Resolution(security=Security("000001", "平安银行"))
+    searched = []
+    retriever = InvestmentRetriever(embed=lambda texts: {"dense": [[1, 0]], "sparse": [{1: 1}]})
+    def search(kind, dense, sparse, **options):
+        searched.append(kind)
+        assert kind != "personal"
+        return [document(kind)]
+    retriever.search = search
+    settings = Mock(side_effect=RuntimeError("private-profile-token"))
+    investment = InvestmentAssistant(retriever, SelectAll(), lambda query, docs: (docs, "completed"), settings)
+    risk = Mock()
+    risk.answer.return_value = "平安银行000001；高风险；日期2026-11-27；来源测试"
+    service = QueryService(resolver, risk, investment=investment, history=isolated_history)
+    app = create_app(summary_enabled=False)
+    app.dependency_overrides[get_query_service] = lambda: service
+    with TestClient(app) as client:
+        body = client.post("/query", json={"query": "000001结合我的复盘", "session_id": "profile-outage",
+                                          "is_stream": streaming}).json()
+        if streaming:
+            events = [json.loads(part.splitlines()[1][6:]) for part in client.get("/stream/" + body["task_id"]).text.split("\n\n") if part.strip()]
+            answer = events[-1]["answer"]
+            assert events[-2]["answer"] == answer and not events[-1].get("error")
+            assert client.get("/status/" + body["task_id"]).json()["answer"] == answer
+        else:
+            answer = body["answer"]
+        assert client.get("/history/profile-outage").json()["items"][-1]["text"] == answer
+    assert searched == ["knowledge", "review"]
+    assert all(text in answer for text in (risk.answer.return_value, "用户档案暂不可用", "松柏6284", "白鹭9527"))
+    assert "青鹭7391" not in answer and "private-profile-token" not in answer
+    assert answer.count(DISCLAIMER) == 1
+
+
+def test_profile_recovers_on_next_turn_without_retaining_failed_or_widened_scope():
+    retriever = Mock()
+    retriever.retrieve.return_value = {kind: {'status': 'empty', 'items': []} for kind in routes()}
+    mode_id, document_id = str(uuid4()), str(uuid4())
+    settings = Mock(side_effect=[RuntimeError('private'), {'active_mode_id': mode_id,
+        'modes': [{'id': mode_id, 'name': '恢复后的模式', 'document_ids': [document_id]}]}])
+    investment = InvestmentAssistant(retriever, SelectAll(), lambda query, docs: (docs, 'empty'), settings)
+    assert investment.answer('我的策略')['personalization_status'] == 'unavailable'
+    recovered = investment.answer('我的策略')
+    assert recovered['personalization_status'] == 'available'
+    assert '用户档案暂不可用' not in recovered['answer']
+    assert retriever.retrieve.call_args.kwargs == {'document_ids': [document_id]}
 
 
 def test_rerank_failure_keeps_rrf_order(monkeypatch):

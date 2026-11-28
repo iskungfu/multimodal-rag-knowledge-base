@@ -29,8 +29,10 @@ def fuse(routes, rank_constant=60, limit=18):
 
 
 class InvestmentRetriever:
-    def __init__(self, documents=None, review_index=None, client=None, embed=None, collections=None):
+    def __init__(self, documents=None, review_index=None, client=None, embed=None, collections=None,
+                 *, client_factory=None, collection_name=None):
         self.documents, self.review_index, self.client = documents, review_index, client
+        self.client_factory, self.collection_name = client_factory, collection_name
         self.embed = embed or embed_texts
         self.collections = collections or {
             "personal": os.getenv("STRATEGY_COLLECTION", "strategy_chunks_v1"),
@@ -64,8 +66,8 @@ class InvestmentRetriever:
         from knowledge.utils.clients.storage_clients import StorageClients
         from knowledge.utils.milvus_util import create_hybrid_search_requests, execute_hybrid_search_query
         from knowledge.strategy.scope import scoped_fields, legacy_public_collection
-        client = self.client if self.client is not None else StorageClients.get_milvus_client()
-        collection = self.collections[kind]
+        client = self.client if self.client is not None else (self.client_factory or StorageClients.get_milvus_client)()
+        collection = self.collection_name(kind) if self.collection_name is not None else self.collections[kind]
         if not collection:
             raise ValueError("未配置公共知识库")
         if not client.has_collection(collection, timeout=10):

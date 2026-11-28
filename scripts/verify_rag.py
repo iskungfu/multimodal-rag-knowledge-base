@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+from dataclasses import replace
 import json
 import logging
 import os
@@ -31,6 +32,15 @@ def main():
     run_id = "rag_accept_" + uuid.uuid4().hex[:12]
     collections = [run_id + "_items", run_id + "_chunks"]
     bucket = run_id.replace("_", "-")
+    from knowledge.runtime import QueryRuntime, RuntimeConfig
+    try:
+        config = RuntimeConfig.acceptance("stock", run_id)
+    except ValueError:
+        print("必须提供与业务库不同的独立 AFK_TEST_DB_NAME。")
+        return 1
+    # 查询运行借用本脚本导入并管理的公共集合，其余资源由运行自身登记清理。
+    config = replace(config, vector_names={**config.vector_names, "items": collections[0], "knowledge": collections[1]},
+                     borrowed_vectors=frozenset(collections))
     os.environ.update({
         "MONGO_DB_NAME": test_db,
         "DAILY_SUMMARY_ENABLED": "0",
@@ -50,8 +60,7 @@ def main():
     console = sys.stdout
     started = time.monotonic()
     clients = None
-    history_collection = None
-    original_history_collection = None
+    runtime = None
     local_paths = []
 
     def check(name, passed, detail=None):
@@ -67,10 +76,9 @@ def main():
                 from fastapi.testclient import TestClient
                 from langchain_core.callbacks import BaseCallbackHandler
                 from knowledge.api.import_api import create_app
-                from knowledge.api.query_api import app as query_api
+                from knowledge.api.query_api import create_app as create_query_app
                 from knowledge.utils.clients.storage_clients import StorageClients
                 from knowledge.utils.task_util import get_task_info
-                import knowledge.service.query_service as query_module
                 from knowledge.core.paths import get_local_base_dir
 
                 clients = StorageClients
@@ -79,11 +87,10 @@ def main():
                 milvus = clients.get_milvus_client()
                 check("milvus_grpc", isinstance(milvus.list_collections(timeout=15), list))
                 check("isolated_collections", not any(milvus.has_collection(name) for name in collections))
-                from knowledge.utils import mongo_history_util
-                history_collection = mongo[test_db][run_id + "_history"]
+                runtime = QueryRuntime(config)
+                query_api = create_query_app(summary_enabled=False, runtime=runtime)
+                history_collection = runtime.history
                 check("isolated_history", history_collection.name not in mongo[test_db].list_collection_names())
-                original_history_collection = mongo_history_util._get_collection
-                mongo_history_util._get_collection = lambda: history_collection
 
                 if args.legacy:
                     from pymilvus import DataType
@@ -172,10 +179,10 @@ def main():
                                 observed["selection_status"] = outputs["selection_status"]
 
                 observed = {}
-                query_module.query_app = query_module.query_app.with_config(callbacks=[Observer()])
+                query_service = runtime.query
+                query_service.graph = query_service.graph_factory().with_config(callbacks=[Observer()])
                 if args.knowledge:
-                    from knowledge.core.deps import get_query_service
-                    investment = get_query_service().investment
+                    investment = query_service.investment
                     investment.graph = investment.graph.with_config(callbacks=[Observer()])
                 question = "青禾 QH-731 复盘记录器执行离线复盘校验时，校验口令是什么，回看窗口设为多少个交易日？请引用手册。"
                 if args.knowledge:
@@ -221,7 +228,12 @@ def main():
                 report["error_type"] = type(exc).__name__
                 print("验收异常详情已隐藏：" + type(exc).__name__)
             finally:
-                if clients:
+                query_stopped = True
+                if runtime is not None:
+                    report["resources"] = runtime.manifest()
+                    report["cleanup"].update(runtime.close())
+                    query_stopped = report["cleanup"].get("workers_stopped", False)
+                if clients and query_stopped:
                     for name in collections:
                         try:
                             client = clients.get_milvus_client()
@@ -239,14 +251,6 @@ def main():
                         report["cleanup"]["minio"] = True
                     except Exception:
                         report["cleanup"]["minio"] = False
-                    try:
-                        if original_history_collection:
-                            mongo_history_util._get_collection = original_history_collection
-                        if history_collection is not None:
-                            history_collection.drop()
-                        report["cleanup"]["mongo"] = True
-                    except Exception:
-                        report["cleanup"]["mongo"] = False
                 for path in local_paths:
                     if path.parent.resolve().parent == Path(get_local_base_dir()).resolve() and path.name.startswith(run_id):
                         if path.is_dir():

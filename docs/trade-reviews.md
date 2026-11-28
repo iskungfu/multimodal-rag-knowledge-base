@@ -11,6 +11,8 @@
 
 使用现有 `MONGO_URL`、`MONGO_DB_NAME`，集合 `trade_reviews`，按 `owner_id + created_at` 建索引。复盘 UUID 使用 MongoDB `_id` 唯一索引去重。同一 UUID 与文本再次提交只读取已有结果，不重复调用模型；同一 UUID 配不同文本返回 409。前端失败重试会保留当前输入和 UUID，输入变化后才生成新编号。
 
+新增和编辑均在写入前校验脱敏后的完整原文，输入及脱敏结果共用 10000 字符上限。例如金额脱敏导致文本由 10000 增长为 10006 字符时，返回 422 并提示调整；不保存、不抽取、不撤销旧索引，也不截断条件或未成交语义。服务层直接调用同样遵守此约束，索引领取、展示状态和检索引用使用同一契约。历史上已保存的超长记录仍可完整读取，但显示 `index_status=invalid_text` 和编辑提示，禁止再次建立无效索引；历史完成状态也不再显示为可检索。用户编辑缩短后正常重新建立索引，不自动截断或批量改写用户资料。
+
 文档包含 `original_text`、`extraction`、`extraction_status`（`pending/succeeded/failed`）、`extraction_error`、`owner_id`、`doc_type=review`、UTC 创建及更新时间。响应将 `_id` 转为 `id`，附带固定免责声明。
 
 先插入文本，再调用模型。网络、配置、模型响应截断均降级为 `model_unavailable`；JSON/schema/原文依据校验失败降级为 `invalid_extraction`。这些情况下 HTTP 201 表示文本已保存，`extraction=null`，不能把它当作抽取成功。首次数据库写入故障为 503；若只有后续抽取结果写入失败，返回已保存文本与提示，数据库保持 `pending`。进程在抽取阶段退出也可能留下 `pending`，原文仍可读；可以通过编辑原文重新发起抽取，没有后台自动重抽任务。

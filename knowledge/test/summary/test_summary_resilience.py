@@ -5,7 +5,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, Mock
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import mongomock
 import pytest
@@ -143,55 +144,36 @@ def test_fresh_primary_replaces_cache_without_fallback(repository):
 
 @pytest.fixture
 def mongo_factory(monkeypatch):
-    summary_api._create_summary_service.cache_clear()
+    from knowledge.runtime import QueryRuntime
     factory = Mock(side_effect=lambda *args, **kwargs: mongomock.MongoClient(tz_aware=True))
-    monkeypatch.setattr("pymongo.MongoClient", factory)
     monkeypatch.setenv("MONGO_URL", "mongodb://summary-test.invalid")
     monkeypatch.setenv("MONGO_DB_NAME", "summary_resilience_test")
-    yield factory
-    summary_api._create_summary_service.cache_clear()
+    runtime = QueryRuntime(mongo_factory=factory)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=runtime)))
+    yield SimpleNamespace(runtime=runtime, factory=factory, request=request)
+    runtime.close()
 
 
 def test_concurrent_first_requests_share_service_and_generation_slot(monkeypatch, mongo_factory):
     workers = 8
     constructor_entered = threading.Event()
     release_constructor = threading.Event()
-    all_callers_entered = threading.Event()
-
-    class ObservedLock:
-        def __init__(self):
-            self.lock = threading.Lock()
-            self.counter_lock = threading.Lock()
-            self.callers = 0
-
-        def __enter__(self):
-            with self.counter_lock:
-                self.callers += 1
-                if self.callers == workers:
-                    all_callers_entered.set()
-            self.lock.acquire()
-            return self
-
-        def __exit__(self, *args):
-            self.lock.release()
 
     def connect(*args, **kwargs):
         constructor_entered.set()
         assert release_constructor.wait(5)
         return mongomock.MongoClient(tz_aware=True)
 
-    monkeypatch.setattr(summary_api, "_summary_service_lock", ObservedLock())
-    mongo_factory.side_effect = connect
+    mongo_factory.factory.side_effect = connect
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(summary_api.get_summary_service) for index in range(workers)]
+        futures = [pool.submit(summary_api.get_summary_service, mongo_factory.request) for index in range(workers)]
         try:
             assert constructor_entered.wait(5)
-            assert all_callers_entered.wait(5)
         finally:
             release_constructor.set()
         services = [future.result(timeout=5) for future in futures]
 
-    mongo_factory.assert_called_once()
+    mongo_factory.factory.assert_called_once()
     assert all(service is services[0] for service in services)
     service = services[0]
     service.now = lambda: NOW
@@ -203,22 +185,24 @@ def test_concurrent_first_requests_share_service_and_generation_slot(monkeypatch
             services[-1].begin(DAY - timedelta(days=1))
     finally:
         service.slot.release()
-        service.mongo_client.close()
 
 
-def test_failed_initialization_closes_client_and_allows_retry(mongo_factory):
-    failed_client = MagicMock()
-    failed_client.__getitem__.return_value.daily_summaries.create_index.side_effect = RuntimeError("private-token")
-    recovered_client = mongomock.MongoClient(tz_aware=True)
-    mongo_factory.side_effect = [failed_client, recovered_client]
+def test_failed_initialization_keeps_runtime_ownership_and_allows_retry(mongo_factory, monkeypatch):
+    runtime = mongo_factory.runtime
+    collection = runtime.collection("summaries")
+    create_index = collection.create_index
+    attempts = []
+    def transient_failure(*args, **kwargs):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("private-token")
+        return create_index(*args, **kwargs)
+    monkeypatch.setattr(collection, "create_index", transient_failure)
 
     with pytest.raises(HTTPException) as failure:
-        summary_api.get_summary_service()
+        summary_api.get_summary_service(mongo_factory.request)
 
     assert failure.value.status_code == 503 and "private-token" not in failure.value.detail
-    failed_client.close.assert_called_once()
-    service = summary_api.get_summary_service()
-    assert service.mongo_client is recovered_client
-    assert summary_api.get_summary_service() is service
-    assert mongo_factory.call_count == 2
-    recovered_client.close()
+    service = summary_api.get_summary_service(mongo_factory.request)
+    assert summary_api.get_summary_service(mongo_factory.request) is service
+    mongo_factory.factory.assert_called_once()

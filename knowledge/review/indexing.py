@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from knowledge.review.privacy import redact_text, redact_value
 from knowledge.review.publication import index_state
+from knowledge.review.text import ReviewTextError, prepare_review_text
 
 
 def digest(text):
@@ -75,18 +76,21 @@ def embed_texts(texts):
 
 class ReviewIndexer:
     def __init__(self, repository=None, vectors=None, embed=None, now=None, tokenizer=None, max_tokens=None,
-                 collection=None):
+                 collection=None, vectors_factory=None):
         self.repository, self.vectors = repository, vectors
         self.embed = embed or embed_texts
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.tokenizer, self.max_tokens = tokenizer, max_tokens
         self.collection = collection if collection is not None else os.getenv("REVIEW_COLLECTION", "review_chunks_v1")
+        self.vectors_factory = vectors_factory
 
     def describe(self, document):
         state = index_state(document, self.now())
         hidden = {"index_token", "index_manifest", "index_window", "index_lease_until", "edit_request_id"}
         result = {key: value for key, value in document.items() if key not in hidden}
         result.update(index_status=state.status, index_retry_after=state.retry_after, index_can_retry=state.can_retry)
+        if state.status == "invalid_text":
+            result["warning"] = "复盘原文已保留，但脱敏后文本不符合 1 至 10000 字约束；请编辑原文后重新保存。"
         return result
 
     def _repository(self):
@@ -98,6 +102,8 @@ class ReviewIndexer:
         return self.repository
 
     def _vectors(self):
+        if self.vectors is None and self.vectors_factory is not None:
+            self.vectors = self.vectors_factory()
         if self.vectors is None:
             from knowledge.review.vectors import ReviewVectors
             from knowledge.utils.clients.storage_clients import StorageClients
@@ -124,7 +130,9 @@ class ReviewIndexer:
                     or entity.get("content_hash") != content_hash):
                 continue
             original = record.get("original_text")
-            if not isinstance(original, str) or not original.strip() or len(original) > 10000:
+            try:
+                original = prepare_review_text(original)
+            except ReviewTextError:
                 continue
             key = (identifier, str(hit["id"]))
             if key in seen:
@@ -171,6 +179,7 @@ class ReviewIndexer:
             return
         vectors = self.vectors
         try:
+            prepare_review_text(claim["original_text"])
             vectors = self._vectors()
             tokenizer, max_tokens = self.token_budget()
             texts = index_texts(claim, tokenizer, max_tokens)

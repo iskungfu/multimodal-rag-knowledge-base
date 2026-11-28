@@ -75,6 +75,8 @@ curl http://localhost:8001/daily-summaries/2026-11-27
 
 `daily_summaries` 唯一 `(owner_id,date)`；状态 pending → processing → completed/failed，记录 attempts、created_at、updated_at、generated_at、result、error。result 包含实际日期、两指数/关注股票证据、策略引用、警告及答案。
 
+失败另记录固定 `error_code`，用于运维诊断和验收报告。模型相关原因包括 `model_incomplete`、`model_invalid_response`、`model_invalid_json`、`model_invalid_schema`、`model_unknown_source`、`model_quote_mismatch`、`model_unknown_evidence`、`model_empty_selection`、`model_timeout` 和 `model_unavailable`。重复 JSON 字段也按无效 JSON 拒绝。日志仅记录固定码，不记录模型原文、用户原文或底层异常信息；`attempts` 保留生成次数。重新领取任务时清空旧错误码，成功后保持空值；租约过期记为 `lease_expired`。这些分类可定位后续失败，但不能反推此前只记录 `ValueError` 的历史失败原因。
+
 原子 claim、300秒租约、随机 token fencing 防止多个进程发布同日结果。GET/POST/下次任务会将过期 processing 改为 failed，随后可重试；旧 worker 的 token/过期租约不能覆盖新结果。失败不覆盖既存 result 和 generated_at，也不覆盖其他日期成功记录。数据库暂不可用时不能保证立刻写入失败状态，恢复后通过租约回收。
 
 同进程最多一个实际生成 worker，避免连续手动点击堆积后台线程；外部 HTTP/MongoDB/LLM 均设置超时，流程在每个阶段检查 240秒预算。进程崩溃的任务在最多300秒后可重新 claim；本机 BGE 等底层调用无法安全强杀线程，若它永久卡住，记录仍会过期为 failed，但该进程需要重启才能释放生成槽。没有实现通用任务平台、自动无限重试或后台推送。
@@ -89,6 +91,8 @@ DAILY_SUMMARY_ENABLED=0 AFK_RUN_SUMMARY_INTEGRATION=1 /tmp/shopkeeper-venv/bin/p
 ```
 
 默认探针执行真实 Milvus（二维人工向量、不是 BGE）、MongoDB、指数/个股、应用 LLM、实际 APScheduler executor 与 API/去重/引用，并清理本次资源；不会访问业务策略。报告只记录检查结果，不记录策略原文或密钥，位于被忽略的 `.sandcastle/logs/summary_accept_*.json`。
+
+探针与主机模式统一使用本次 `QueryRuntime`，不修改业务存储环境变量或全局历史集合。二维探针仅挂载摘要入口；主机模式开放聊天、行情、日历、复盘、摘要与策略，档案及全市场采集入口返回 404。个人策略摘要探针保留原有检查范围，公共知识与档案由投资助手验收覆盖。调用方在所有 TestClient 和浏览器运行结束后统一关闭运行，停止调度与活动任务，再清理登记的 UUID 集合和连接；未停止时保留资源，清理失败影响退出码。报告包含资源清单，详见 ADR-0012。
 
 沙箱无本机 BGE/MinerU/浏览器，不下载大型模型。主机使用已有环境：
 

@@ -1,16 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from knowledge.personalization.settings import (
-    InvalidStrategyDocuments, SettingsConflict, SettingsRequest, get_settings_repository,
+    InvalidStrategyDocuments, SettingsConflict, SettingsRequest,
 )
 
 router = APIRouter(prefix="/investor-settings", tags=["investor-settings"])
 
 
-def get_repository():
+def get_repository(request: Request = None):
+    from knowledge.runtime import runtime_for
     try:
-        return get_settings_repository()
+        return runtime_for(request).settings
     except Exception:
         raise HTTPException(503, "用户档案暂不可用，请稍后重试") from None
 

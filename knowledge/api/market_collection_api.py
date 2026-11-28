@@ -1,12 +1,9 @@
-import os
 from datetime import date as calendar_date
-from functools import cache
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from knowledge.market.collection import CollectionBusy, CollectionRepository, MarketCollectionService
-from knowledge.market.repository import MarketQuoteRepository
+from knowledge.market.collection import CollectionBusy
 
 router = APIRouter(prefix="/market/collection", tags=["market-collection"])
 
@@ -17,21 +14,11 @@ class CollectionRequest(BaseModel):
     retry: bool = False
 
 
-@cache
-def get_collection_service():
-    from pymongo import MongoClient
-    mongo = None
+def get_collection_service(request: Request = None):
+    from knowledge.runtime import runtime_for
     try:
-        mongo = MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000,
-                            connectTimeoutMS=5000, socketTimeoutMS=5000, tz_aware=True)
-        db = mongo[os.getenv("MONGO_DB_NAME", "kb001")]
-        service = MarketCollectionService(CollectionRepository(db.market_collection_runs, db.market_collection_locks),
-                                          MarketQuoteRepository(db.market_quotes))
-        service.mongo_client = mongo
-        return service
+        return runtime_for(request).collection_job
     except Exception:
-        if mongo is not None:
-            mongo.close()
         raise HTTPException(503, "全市场采集存储暂不可用") from None
 
 

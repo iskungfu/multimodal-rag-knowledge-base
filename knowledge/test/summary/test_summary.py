@@ -199,6 +199,28 @@ def test_model_failure_and_insufficient_are_distinct(env):
     assert env.service.generate(DAY)['result']['strategy_status'] == 'insufficient'
 
 
+def test_model_failure_code_is_persisted_without_overwriting_success_and_cleared_on_retry(env, caplog):
+    original = env.service.generate(DAY)['result']
+    item = {'chunk_id': 'source-1', 'content': '如果风险较高，先核对仓位上限。'}
+    env.strategies.retrieve.return_value = {'status': 'retrieved', 'items': [item]}
+    env.model.select.side_effect = lambda *args, **kwargs: validate_selections(
+        {'checks': [{'chunk_id': 'source-1', 'quote': 'private-model-text', 'evidence_ids': ['index:sh000001']}]},
+        [item], [{'id': 'index:sh000001'}])
+    failed = env.service.generate(DAY, retry=True)
+    assert failed['status'] == 'failed' and failed['result'] == original
+    assert failed['error_code'] == 'model_quote_mismatch'
+    assert env.db.summaries.find_one()['error_code'] == failed['error_code']
+    assert 'model_quote_mismatch' in caplog.text
+    assert 'private-model-text' not in str(failed) + caplog.text
+    claim, processing = env.service.begin(DAY)
+    assert processing['error_code'] is None
+    env.model.select.side_effect = None
+    env.model.select.return_value = [dict(item, title='条件策略')]
+    env.service.run(claim)
+    recovered = env.repo.get('default_user', DAY, NOW)
+    assert recovered['status'] == 'completed' and recovered['error_code'] is None
+
+
 def test_strategy_checklist_citations_redaction_write_and_read(env):
     item = {'source': 'personal', 'owner_id': 'default_user', 'document_id': 'test-13812345678-doc',
             'chunk_id': '13812345678', 'title': '姓名：王小明。',

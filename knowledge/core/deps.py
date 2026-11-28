@@ -1,4 +1,5 @@
 from functools import cache
+from fastapi import HTTPException, Request
 
 
 @cache
@@ -7,7 +8,9 @@ def get_file_process_service():
     return FileProcessService()
 
 
-@cache
-def get_query_service():
-    from knowledge.service.query_service import QueryService
-    return QueryService()
+def get_query_service(request: Request = None):
+    from knowledge.runtime import runtime_for
+    try:
+        return runtime_for(request).query
+    except Exception:
+        raise HTTPException(503, "查询存储暂不可用，请稍后重试") from None

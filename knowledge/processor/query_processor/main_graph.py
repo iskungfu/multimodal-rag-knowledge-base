@@ -37,7 +37,7 @@ def route_after_item_confirm(state: QueryGraphState) -> bool:
     return False
 
 
-def create_query_graph() -> CompiledStateGraph:
+def create_query_graph(*, config=None, client_factory=None, history=None) -> CompiledStateGraph:
     """创建查询流程图。
 
     Returns:
@@ -82,15 +82,15 @@ def create_query_graph() -> CompiledStateGraph:
 
     # 2. 实例化节点
     nodes = {
-        "item_name_confirmed_node": ItemNameConfirmedNode(),
+        "item_name_confirmed_node": ItemNameConfirmedNode(config, client_factory=client_factory, history=history),
         "multi_search": lambda x: x,  # 虚拟节点
-        "vector_search_node": VectorSearchNode(),
-        "hyde_search_node": HydeSearchNode(),
-        "web_search_node": WebSearchNode(),
+        "vector_search_node": VectorSearchNode(config, client_factory=client_factory),
+        "hyde_search_node": HydeSearchNode(config, client_factory=client_factory),
+        "web_search_node": WebSearchNode(config),
         "join": lambda x: {},  # 虚拟节点
-        "rrf_merge_node": RrfMergeNode(),
-        "rerank_node": RerankNode(),
-        "answer_output_node": AnswerOutputNode()
+        "rrf_merge_node": RrfMergeNode(config),
+        "rerank_node": RerankNode(config),
+        "answer_output_node": AnswerOutputNode(config)
     }
 
     # 3. 添加节点

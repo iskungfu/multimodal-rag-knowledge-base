@@ -1,32 +1,23 @@
 """查询服务中的复盘 API，固定单用户，不接受客户端指定 owner_id。"""
 
-import os
-from functools import cache
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pymongo import MongoClient
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pymongo.errors import PyMongoError
 
-from knowledge.review.repository import ReviewConflict, ReviewRepository
+from knowledge.review.repository import ReviewConflict
+from knowledge.review.text import ReviewTextError
 from knowledge.schema.review_schema import ReviewEditRequest, ReviewRequest
 from knowledge.service.review_service import ReviewService
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
 
 
-@cache
-def get_review_service():
-    client = None
+def get_review_service(request: Request = None):
+    from knowledge.runtime import runtime_for
     try:
-        client = MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000,
-                             connectTimeoutMS=5000, socketTimeoutMS=5000, tz_aware=True)
-        from knowledge.review.indexing import ReviewIndexer
-        repository = ReviewRepository(client[os.getenv("MONGO_DB_NAME", "kb001")]["trade_reviews"])
-        return ReviewService(repository, indexer=ReviewIndexer(repository))
-    except (KeyError, ValueError, PyMongoError):
-        if client is not None:
-            client.close()
+        return runtime_for(request).reviews
+    except Exception:
         raise HTTPException(503, "复盘存储暂不可用") from None
 
 
@@ -34,6 +25,8 @@ def get_review_service():
 def save_review(request: ReviewRequest, service: ReviewService = Depends(get_review_service)):
     try:
         return service.save(request.text, request.request_id)
+    except ReviewTextError as failure:
+        raise HTTPException(422, str(failure)) from None
     except ReviewConflict:
         raise HTTPException(409, "请求编号已用于其他复盘") from None
     except PyMongoError:
@@ -74,6 +67,8 @@ def index_review(review_id: UUID, service: ReviewService = Depends(get_review_se
 def edit_review(review_id: UUID, request: ReviewEditRequest, service: ReviewService = Depends(get_review_service)):
     try:
         document = service.edit(review_id, request.text, request.revision, request.request_id)
+    except ReviewTextError as failure:
+        raise HTTPException(422, str(failure)) from None
     except ReviewConflict:
         raise HTTPException(409, "复盘已被更新或请求编号已使用，请保留修改内容并刷新核对版本") from None
     except PyMongoError:

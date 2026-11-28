@@ -16,6 +16,7 @@ const indexStates = {
     completed: '索引已完成，可在提问时检索这条复盘。',
     failed: '索引失败，原文已保存，可稍后重试。',
     interrupted: '索引中断，原文已保存，可重试。',
+    invalid_text: '原文已保留，脱敏后内容不符合 1 至 10000 字限制；请编辑原文后重新保存。',
 };
 
 function node(tag, text) {
@@ -54,7 +55,7 @@ function renderReview(review) {
     const indexing = document.createElement('div');
     const indexStatus = review.index_status || 'pending';
     indexing.append(node('p', `检索索引：${indexStates[indexStatus] || '状态暂不可用，原文已保存。'}`));
-    if (!['completed', 'processing'].includes(indexStatus)) {
+    if (!['completed', 'processing', 'invalid_text'].includes(indexStatus)) {
         const retry = node('button', indexStatus === 'pending' ? '建立索引' : '重试索引');
         retry.type = 'button';
         retry.className = 'btn btn-ghost btn-sm';

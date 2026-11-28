@@ -64,6 +64,7 @@ def register_router(app: FastAPI) -> None:
     async def query(
             request: QueryRequest,
             background_tasks: BackgroundTasks,
+            http_request: Request,
             service: QueryService = Depends(get_query_service),
     ):
         """提交查询。
@@ -76,6 +77,7 @@ def register_router(app: FastAPI) -> None:
 
         # 2. 任务ID（单次提问唯一）
         task_id = service.generate_task_id()
+        http_request.app.state.runtime.register_task(task_id)
 
         # 3. 流式模式
         if request.is_stream:
@@ -84,6 +86,7 @@ def register_router(app: FastAPI) -> None:
 
             # 3.2 后台执行主图
             background_tasks.add_task(
+                http_request.app.state.runtime.run_task,
                 service.run_query_graph, task_id, session_id, request.query, True
             )
 
@@ -97,7 +100,8 @@ def register_router(app: FastAPI) -> None:
         # 4. 非流式模式：放线程池执行，避免阻塞事件循环
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
-            None, service.run_query_graph, task_id, session_id, request.query, False
+            None, http_request.app.state.runtime.run_task,
+            service.run_query_graph, task_id, session_id, request.query, False
         )
 
         # 5. 返回完整结果
@@ -114,6 +118,8 @@ def register_router(app: FastAPI) -> None:
     @app.get("/stream/{task_id}")
     async def stream(task_id: str, request: Request):
         """SSE 长连接：推送 progress / delta / final 事件"""
+        if not request.app.state.runtime.owns_task(task_id):
+            raise HTTPException(404, "任务不存在")
         return StreamingResponse(
             sse_generator(task_id, request),
             media_type="text/event-stream",
@@ -122,10 +128,11 @@ def register_router(app: FastAPI) -> None:
     @app.get("/status/{task_id}", response_model=QueryStatusResponse)
     def get_status(
             task_id: str,
+            request: Request,
             service: QueryService = Depends(get_query_service),
     ):
         """查询任务状态（轮询备用，前端当前主要走 SSE）"""
-        if get_task_result(task_id, "private"):
+        if not request.app.state.runtime.owns_task(task_id) or get_task_result(task_id, "private"):
             raise HTTPException(404, "任务不存在")
         return QueryStatusResponse(**service.get_status(task_id))
 
@@ -149,14 +156,19 @@ def register_router(app: FastAPI) -> None:
         return {"message": "History cleared", "deleted_count": deleted_count}
 
 
-def create_app(*, summary_enabled=None) -> FastAPI:
+def create_app(*, summary_enabled=None, runtime=None) -> FastAPI:
     """创建查询服务 FastAPI 应用"""
+    from knowledge.runtime import QueryRuntime, RuntimeConfig, RuntimeRequests
+    owns_runtime = runtime is None
+    runtime = runtime if runtime is not None else QueryRuntime(RuntimeConfig.from_env(summary_enabled=summary_enabled))
     app = FastAPI(
         title="多模态RAG智能知识库查询服务",
         description="知识库查询流程 API",
         version="1.0",
-        lifespan=summary_lifespan(summary_enabled),
+        lifespan=summary_lifespan(summary_enabled, runtime=runtime, close_runtime=owns_runtime),
     )
+    app.state.runtime = runtime
+    app.add_middleware(RuntimeRequests, runtime=runtime)
 
     # 跨域配置
     app.add_middleware(
@@ -172,14 +184,23 @@ def create_app(*, summary_enabled=None) -> FastAPI:
     if os.path.isdir(front_dir):
         app.mount("/front", StaticFiles(directory=front_dir))
 
-    register_router(app)
-    app.include_router(market_router)
-    app.include_router(collection_router)
-    app.include_router(calendar_router)
-    app.include_router(review_router)
-    app.include_router(summary_router)
-    app.include_router(settings_router)
-    app.add_exception_handler(RequestValidationError, summary_validation_error)
+    if "query" in runtime.config.features:
+        register_router(app)
+    for feature, router in (("market", market_router), ("collection", collection_router),
+                            ("calendar", calendar_router), ("review", review_router),
+                            ("summary", summary_router), ("settings", settings_router)):
+        if feature in runtime.config.features:
+            app.include_router(router)
+    if "strategy" in runtime.config.features:
+        from knowledge.api.strategy_api import router, strategy_validation_error
+        app.include_router(router)
+        async def validation_error(request, exc):
+            if request.url.path.startswith("/strategies"):
+                return await strategy_validation_error(request, exc)
+            return await summary_validation_error(request, exc)
+        app.add_exception_handler(RequestValidationError, validation_error)
+    else:
+        app.add_exception_handler(RequestValidationError, summary_validation_error)
     return app
 
 

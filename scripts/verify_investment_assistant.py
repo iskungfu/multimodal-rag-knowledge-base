@@ -6,7 +6,6 @@
 """
 
 import argparse
-from contextlib import ExitStack
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -235,13 +234,19 @@ def isolated_environment(test_db, host, prefix):
 
 class Acceptance:
     def __init__(self, args, test_db, prefix, report):
+        from knowledge.runtime import QueryRuntime, RuntimeConfig
         self.args, self.test_db, self.prefix, self.report = args, test_db, prefix, report
         self.mongo = self.raw_milvus = self.milvus = None
-        self.mongo_names, self.vector_names = [], []
-        self.collections = {kind: prefix + "_" + kind for kind in KINDS}
-        self.names = {name: prefix + "_" + name for name in
-                      ("documents", "reviews", "history", "stocks", "indices", "summaries", "watches", "settings")}
-        self.stack = ExitStack()
+        config = RuntimeConfig.acceptance("investment", prefix)
+        self.runtime = QueryRuntime(config, milvus_factory=self._milvus_client)
+        self.collections = {kind: config.vector_names[kind] for kind in KINDS}
+        self.names = {role: name for role, name in config.mongo_names.items() if role not in {"runs", "locks"}}
+
+    def _milvus_client(self):
+        from pymilvus import MilvusClient
+        self.raw_milvus = MilvusClient(uri=self.runtime.config.milvus_url, timeout=15,
+                                       alias="investment_accept_" + uuid.uuid4().hex)
+        return ScopedMilvus(self.raw_milvus, self.runtime.config.vector_names.values())
 
     def check(self, name, result):
         self.report["checks"][name] = bool(result)
@@ -261,36 +266,23 @@ class Acceptance:
         self.safe(name + "_private_data", answer)
 
     def prepare(self):
-        from pymongo import MongoClient
-        from pymilvus import MilvusClient
-        from knowledge.review.repository import ReviewRepository
-        from knowledge.review.vectors import ReviewVectors
-        from knowledge.strategy.repository import StrategyRepository
-        from knowledge.strategy.vectors import StrategyVectors
-        self.mongo = MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000,
-                                 connectTimeoutMS=5000, socketTimeoutMS=15000, tz_aware=True)
+        self.mongo = self.runtime.mongo
         self.db = self.mongo[self.test_db]
         self.check("mongodb_ping", self.db.command("ping")["ok"] == 1)
-        for name in self.names.values():
-            self.check("unique_mongo_" + name.removeprefix(self.prefix + "_"),
+        for role, name in self.names.items():
+            self.check("unique_mongo_" + role,
                        not self.db.list_collection_names(filter={"name": name}))
-            self.mongo_names.append(name)
+            self.runtime.collection(role)
             self.db.create_collection(name)
-        self.documents = self.db[self.names["documents"]]
-        self.reviews = self.db[self.names["reviews"]]
-        self.history = self.db[self.names["history"]]
-        self.document_repo = StrategyRepository(self.documents)
-        self.review_repo = ReviewRepository(self.reviews)
-        self.raw_milvus = MilvusClient(uri=os.environ["MILVUS_URL"], timeout=15)
-        self.milvus = ScopedMilvus(self.raw_milvus, [*self.collections.values(), self.prefix + "_items"])
-        self.vectors = {
-            "personal": StrategyVectors(self.milvus, self.collections["personal"]),
-            "knowledge": StrategyVectors(self.milvus, self.collections["knowledge"]),
-            "review": ReviewVectors(self.milvus, self.collections["review"]),
-        }
+        self.documents = self.runtime.documents
+        self.reviews = self.runtime.collection("reviews")
+        self.history = self.runtime.history
+        self.document_repo = self.runtime.strategy.repository
+        self.review_repo = self.runtime.review_index.repository
+        self.milvus = self.runtime.milvus
+        self.vectors = {kind: self.runtime.vectors(kind) for kind in KINDS}
         for kind, vectors in self.vectors.items():
             self.check("unique_vector_" + kind, not self.milvus.has_collection(vectors.collection))
-            self.vector_names.append(vectors.collection)
             vectors.prepare()
             fields = {field["name"] for field in self.milvus.describe_collection(vectors.collection)["fields"]}
             self.check("scoped_schema_" + kind, {"owner_id", "doc_type", "document_id"}.issubset(fields))
@@ -329,23 +321,14 @@ class Acceptance:
         self.check("insert_" + document_id, result["insert_count"] == 1)
 
     def seed(self):
-        from fastapi import FastAPI
         from fastapi.testclient import TestClient
-        from knowledge.api.strategy_api import router as strategy_router, get_strategy_service
-        from knowledge.api.review_api import router as review_router, get_review_service
-        from knowledge.review.indexing import ReviewIndexer
-        from knowledge.service.review_service import ReviewService
-        from knowledge.service.strategy_service import StrategyService
-        self.strategy_service = StrategyService(self.document_repo, self.vectors["personal"])
-        self.indexer = ReviewIndexer(self.review_repo, self.vectors["review"])
-        self.review_service = ReviewService(self.review_repo, indexer=self.indexer)
-        fixture_app = FastAPI()
-        fixture_app.include_router(strategy_router)
-        fixture_app.include_router(review_router)
-        fixture_app.dependency_overrides[get_strategy_service] = lambda: self.strategy_service
-        fixture_app.dependency_overrides[get_review_service] = lambda: self.review_service
+        from knowledge.api.query_api import create_app
+        self.strategy_service = self.runtime.strategy
+        self.indexer = self.runtime.review_index
+        self.review_service = self.runtime.reviews
+        self.app = create_app(summary_enabled=False, runtime=self.runtime)
         self.review_id = str(uuid.uuid4())
-        with TestClient(fixture_app) as api:
+        with TestClient(self.app) as api:
             response = api.post("/strategies/text", json={"title": "自建个人策略", "text": SAMPLES["personal"]})
             self.check("strategy_import_api", response.status_code == 202)
             self.personal_id = response.json()["task_id"]
@@ -402,11 +385,6 @@ class Acceptance:
             self.milvus.flush(collection, timeout=30)
         self.report["coverage"]["real_review_index"] = True
 
-    def retriever(self, **overrides):
-        from knowledge.investment.retrieval import InvestmentRetriever
-        return InvestmentRetriever(documents=self.documents, review_index=self.indexer,
-                                   client=self.milvus, collections=self.collections, **overrides)
-
     def assert_routes(self, name, routes):
         self.check(name + "_three_routes", set(routes) == set(KINDS)
                    and all(routes[kind]["status"] == "retrieved" for kind in KINDS))
@@ -431,7 +409,7 @@ class Acceptance:
 
     def retrieval_checks(self):
         from knowledge.investment.retrieval import fuse
-        self.real_retriever = self.retriever()
+        self.real_retriever = self.runtime.retriever
         routes = self.real_retriever.retrieve(COMBINED_QUERY)
         self.assert_routes("real_recall", routes)
         for kind in KINDS:
@@ -481,43 +459,21 @@ class Acceptance:
                            for document in fused))
 
     def build_app(self):
-        from knowledge.api.query_api import create_app
-        from knowledge.api.market_api import get_market_service
-        from knowledge.api.review_api import get_review_service
-        from knowledge.api.strategy_api import router as strategy_router, get_strategy_service
-        from knowledge.api import summary_api
-        from knowledge.core.deps import get_query_service
-        from knowledge.investment.generation import EvidenceSelector, rerank
-        from knowledge.market.repository import MarketQuoteRepository
-        from knowledge.service.investment_service import InvestmentAssistant
-        from knowledge.service.market_service import MarketService
-        from knowledge.service.query_service import QueryService
-        from knowledge.service.risk_service import RiskService
-        from knowledge.service.summary_service import SummaryService
-        from knowledge.summary.indices import IndexService, IndexRepository
-        from knowledge.summary.repository import SummaryRepository, WatchlistRepository
-        from knowledge.summary.strategies import PersonalStrategyRetriever
-        from knowledge.summary.knowledge import PublicKnowledgeRetriever
-        from knowledge.personalization.settings import SettingsRepository
-        from knowledge.api.settings_api import get_repository as get_settings_repository
-        from knowledge.utils import mongo_history_util
-        from knowledge.utils.clients.storage_clients import StorageClients
-        self.market = MarketService(MarketQuoteRepository(self.db[self.names["stocks"]]))
-        self.risk = ObservedRisk(RiskService(market_factory=lambda: self.market))
-        self.selector = ObservedSelector(EvidenceSelector())
-        self.reranker = ObservedReranker(rerank)
-        self.settings_repository = SettingsRepository(self.db[self.names["settings"]], self.documents)
-        self.assistant = ObservedAssistant(InvestmentAssistant(self.real_retriever, self.selector, self.reranker,
-                                                               settings=self.settings_repository.read))
-        self.query_service = QueryService(risk=self.risk, investment=self.assistant)
-        indices = IndexService(IndexRepository(self.db[self.names["indices"]]))
-        summary = SummaryService(SummaryRepository(self.db[self.names["summaries"]]),
-                                 WatchlistRepository(self.db[self.names["watches"]]), indices, self.market,
-                                 PersonalStrategyRetriever(self.documents, self.vectors["personal"]),
-                                 knowledge=PublicKnowledgeRetriever(self.real_retriever), settings=self.settings_repository.read)
+        self.market = self.runtime.market
+        self.query_service = self.runtime.query
+        self.risk = ObservedRisk(self.query_service.risk)
+        investment = self.runtime.investment
+        self.selector = ObservedSelector(investment.selector)
+        self.reranker = ObservedReranker(investment.reranker)
+        investment.selector, investment.reranker = self.selector, self.reranker
+        self.settings_repository = self.runtime.settings
+        self.assistant = ObservedAssistant(investment)
+        self.query_service.risk, self.query_service.investment = self.risk, self.assistant
+        summary = self.runtime.summary
         self.summary = summary
         original_select = summary.model.select
         def observed_summary_select(items, evidence, **options):
+            from knowledge.summary.strategies import model_error_code
             started = time.monotonic()
             call = {"status": "started"}
             self.report.setdefault("summary_model_calls", []).append(call)
@@ -526,24 +482,11 @@ class Acceptance:
                 call["status"] = "completed"
                 return result
             except Exception as exc:
-                call.update(status="failed", error_type=type(exc).__name__)
+                call.update(status="failed", error_type=type(exc).__name__, error_code=model_error_code(exc))
                 raise
             finally:
                 call["seconds"] = round(time.monotonic() - started, 2)
         summary.model.select = observed_summary_select
-        self.stack.enter_context(patch.object(mongo_history_util, "_get_collection", lambda: self.history))
-        self.stack.enter_context(patch.object(StorageClients, "get_mongo_client", lambda: self.mongo))
-        self.stack.enter_context(patch.object(StorageClients, "get_milvus_client", lambda: self.milvus))
-        self.stack.enter_context(patch.object(summary_api, "_create_summary_service", lambda: summary))
-        app = create_app(summary_enabled=False)
-        app.include_router(strategy_router)
-        app.dependency_overrides[get_query_service] = lambda: self.query_service
-        app.dependency_overrides[get_market_service] = lambda: self.market
-        app.dependency_overrides[get_review_service] = lambda: self.review_service
-        app.dependency_overrides[get_strategy_service] = lambda: self.strategy_service
-        app.dependency_overrides[summary_api.get_summary_service] = lambda: summary
-        app.dependency_overrides[get_settings_repository] = lambda: self.settings_repository
-        self.app = app
 
     def personal_mvp_checks(self):
         from datetime import date, time as day_time
@@ -619,6 +562,7 @@ class Acceptance:
             self.check('mvp_summary_accepted', response.status_code == 202)
             record = api.get('/daily-summaries/' + str(day)).json()
             self.report['personal_summary'] = {'status': record.get('status'), 'error': record.get('error'),
+                                              'error_code': record.get('error_code'),
                                               'knowledge_status': record.get('result', {}).get('knowledge_status')}
             self.check('mvp_summary_completed', record['status'] == 'completed')
             result = record['result']
@@ -642,6 +586,7 @@ class Acceptance:
             self.check('mvp_scheduler_target_trading_day', calendar_status['is_trading_day'] is True)
             scheduler = build_scheduler(lambda: self.summary,
                                         calendar_factory=lambda: SimpleNamespace(status=lambda: calendar_status))
+            self.runtime.track_scheduler(scheduler)
             finished = threading.Event()
             scheduler.add_listener(lambda event: finished.set() if event.job_id == 'mvp-once' else None,
                                    EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
@@ -653,7 +598,8 @@ class Acceptance:
                     print('等待隔离摘要调度验收完成…', flush=True)
                 scheduled = self.db[self.names['summaries']].find_one({'owner_id': OWNER, 'date': str(day)})
                 self.report['scheduler'] = {'event_received': finished.is_set(), 'status': scheduled.get('status'),
-                                            'attempts': scheduled.get('attempts'), 'error': scheduled.get('error')}
+                                            'attempts': scheduled.get('attempts'), 'error': scheduled.get('error'),
+                                            'error_code': scheduled.get('error_code')}
                 self.check('mvp_scheduler_current_mode', finished.is_set() and scheduled['status'] == 'completed'
                            and scheduled['attempts'] == record['attempts'] + 1
                            and scheduled['result']['personalization']['mode_id'] == second_mode
@@ -940,33 +886,8 @@ class Acceptance:
             watcher.join(timeout=2)
 
     def cleanup(self):
-        try:
-            self.stack.close()
-        except Exception:
-            self.report["cleanup"]["dependency_restore"] = False
-        if self.raw_milvus is not None:
-            for name in reversed(self.vector_names):
-                try:
-                    if self.raw_milvus.has_collection(name, timeout=10):
-                        self.raw_milvus.drop_collection(name, timeout=30)
-                    self.report["cleanup"][name] = not self.raw_milvus.has_collection(name, timeout=10)
-                except Exception:
-                    self.report["cleanup"][name] = False
-            try:
-                self.raw_milvus.close()
-            except Exception:
-                self.report["cleanup"]["milvus_close"] = False
-        if self.mongo is not None:
-            for name in reversed(self.mongo_names):
-                try:
-                    self.db[name].drop()
-                    self.report["cleanup"][name] = not self.db.list_collection_names(filter={"name": name})
-                except Exception:
-                    self.report["cleanup"][name] = False
-            try:
-                self.mongo.close()
-            except Exception:
-                self.report["cleanup"]["mongo_close"] = False
+        self.report["resources"] = self.runtime.manifest()
+        self.report["cleanup"] = self.runtime.close()
 
 
 def main(argv=None):
@@ -1009,7 +930,10 @@ def main(argv=None):
     logging.disable(logging.CRITICAL)
     try:
         environment = isolated_environment(test_db, args.host, prefix)
-        with patch.dict(os.environ, environment):
+        runtime_environment = {key: value for key, value in environment.items() if key not in {
+            "MONGO_DB_NAME", "STRATEGY_COLLECTION", "CHUNKS_COLLECTION", "REVIEW_COLLECTION", "ITEM_NAME_COLLECTION",
+        }}
+        with patch.dict(os.environ, runtime_environment):
             acceptance = Acceptance(args, test_db, prefix, report)
             try:
                 if args.host:

@@ -53,6 +53,7 @@ def save_chat_message(
         message_id: Optional[str] = None,
         citation_ids: Optional[List[str]] = None,
         query_context: Optional[Dict[str, Any]] = None,
+        *, collection=None,
 ) -> str:
     """保存一条聊天消息，返回插入的文档 id（失败时返回空字符串）"""
     if not session_id or not text:
@@ -72,7 +73,8 @@ def save_chat_message(
         document["query_context"] = redact_value(query_context)
 
     try:
-        result = _get_collection().insert_one(document)
+        target = collection if collection is not None else _get_collection()
+        result = target.insert_one(document)
         return str(result.inserted_id)
     except Exception as e:
         # 历史保存失败不应该影响主流程
@@ -80,13 +82,13 @@ def save_chat_message(
         return ""
 
 
-def get_recent_messages(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+def get_recent_messages(session_id: str, limit: int = 10, *, collection=None) -> List[Dict[str, Any]]:
     """读取某个 session 最近 limit 条聊天记录，按时间正序返回（老 -> 新）"""
     if not session_id:
         return []
 
     try:
-        collection = _get_collection()
+        collection = collection if collection is not None else _get_collection()
 
         # 1. 按时间倒序取最近 limit 条
         cursor = collection.find({"session_id": session_id}).sort([("ts", -1), ("_id", -1)]).limit(limit)
@@ -109,13 +111,14 @@ def get_recent_messages(session_id: str, limit: int = 10) -> List[Dict[str, Any]
         return []
 
 
-def clear_history(session_id: str) -> int:
+def clear_history(session_id: str, *, collection=None) -> int:
     """清空某个 session 的全部聊天记录，返回删除数量"""
     if not session_id:
         return 0
 
     try:
-        result = _get_collection().delete_many({"session_id": session_id})
+        target = collection if collection is not None else _get_collection()
+        result = target.delete_many({"session_id": session_id})
         return result.deleted_count
     except Exception as e:
         logger.error("清空聊天历史失败")
