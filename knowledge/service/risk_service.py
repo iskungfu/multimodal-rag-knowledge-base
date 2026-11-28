@@ -69,7 +69,7 @@ class RiskService:
         lines = [f"{security.name}（{security.code}）｜{conclusion}。",
                  f"证券身份来源：{security.source}。",
                  f"实际行情日期：{day}；距查询日 {lag} 个自然日（非交易日延迟）；{cache}。",
-                 f"行情来源：{latest.get('source', '未知')}；动态 PE 来源：{latest.get('valuation_source') or '缺失'}；抓取时间：{display_time(latest.get('updated_at'))}。",
+                 f"行情来源：{latest.get('source', '未知')}；估值来源：{latest.get('valuation_source') or '缺失'}；抓取时间：{display_time(latest.get('updated_at'))}。",
                  f"源快照时间：{display_time(latest.get('source_time'))}。",
                  f"收盘价：{finite(latest.get('close')):g} 元；成交量：{finite(latest.get('volume')) if finite(latest.get('volume')) is not None else '缺失'} 股。"]
         for key, name in METRIC_NAMES.items():

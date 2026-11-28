@@ -11,9 +11,9 @@
 | AKShare | `stock_zh_a_hist_tx` 通过腾讯 `proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get` 取日线；其他接口分别封装东方财富等来源 | 库是封装层。可参考接口字段与单位，不能把 AKShare + 东方财富当成必然独立的两家来源 |
 | efinance | `stock/getter.py` 多处调用 `eastmoney.com` 的行情、证券和财务接口 | 单纯增加 efinance 不能保证绕过东方财富的故障；财务数据扩展可另行评估 |
 
-Tushare 的官方文档按接口列出 token、积分与访问权限；不能将项目支持 Tushare 等同于全部接口无需配置且免费可用。BaoStock 和 Pytdx 是后续候选，本轮没有运行它们的 SDK，不声明其在本机网络可用或北交所覆盖完整。
+Tushare 的官方文档按接口列出 token、积分与访问权限；不能将项目支持 Tushare 等同于全部接口无需配置且免费可用。第一轮将BaoStock和Pytdx列为后续候选，未运行它们的SDK；后续已完成BaoStock专项，见文末。Pytdx仍未运行。
 
-## 本轮选择
+## 第一轮选择：腾讯历史日线
 
 保持既有 requests + adapter 架构，增加一个不要求 API key 的腾讯不复权历史日线 adapter，无新增生产依赖。
 
@@ -48,3 +48,11 @@ Tushare 的官方文档按接口列出 token、积分与访问权限；不能将
 - [Tushare 日线接口官方说明](https://tushare.pro/document/2?doc_id=27)
 
 真实验收使用 `python scripts/verify_market_fallback.py --with-storage`；需配置独立 `AFK_TEST_DB_NAME`，不回退到业务库。报告保留每只证券的真实日期、样本数、单位比较、来源不可用情况以及本轮随机测试集合的清理结果。未加 `--with-storage` 时只访问公开行情，跳过数据库部分。详见 `.sandcastle/results/free-market-sources-2026-11-28.md`。
+
+## 后续接入：BaoStock与交易日历
+
+2026-11-28在本机实测官方 `baostock==0.9.4`，匿名公共连接取得600519、000001、688981、302132各22条历史及交易日历；920002没有有效证券数据，适配器明确跳过北交所。直接核对SDK源码与真实响应，不把其他平台“支持BaoStock”的声明当作本项目验收。
+
+当前单股顺序为东方财富 → BaoStock → 腾讯历史 → 腾讯快照；全市场仍以腾讯批量快照为首选，缺失补采为东方财富 → BaoStock → 腾讯历史。BaoStock历史涨跌幅直接用于已有波动率计算，不从不复权价差猜测；`peTTM`不能替代动态PE。SDK以有界子进程隔离全局socket，日历仅在明确休市时跳过自动任务。
+
+来源契约、官方发布页、SDK文件与实测边界见 `docs/baostock-and-calendar.md`，决策见ADR-0010，验收见 `.sandcastle/results/baostock-calendar-2026-11-28.md`。独立接入不代表已核实供应商内部上游，也不保证沪深京全量覆盖或长期可用。

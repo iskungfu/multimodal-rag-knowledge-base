@@ -5,13 +5,14 @@ import re
 from knowledge.market.adapters import MarketHTTP, TencentAdapter, EastmoneyAdapter
 from knowledge.market.models import MarketUnavailable, validate_quote_batch, security_name
 from knowledge.market.tencent_history import TencentHistoryAdapter
+from knowledge.market.baostock_source import BaoStockAdapter
 
 
 class BatchQuotes:
     def __init__(self, http=None, fallback=None):
         self.http = http or MarketHTTP()
         self.parser = TencentAdapter(self.http)
-        self.fallbacks = [fallback] if fallback is not None else [EastmoneyAdapter(), TencentHistoryAdapter()]
+        self.fallbacks = [fallback] if fallback is not None else [EastmoneyAdapter(), BaoStockAdapter(), TencentHistoryAdapter()]
 
     def fetch(self, items, day, now, checkpoint=lambda: None):
         if not items or len(items) > 50:

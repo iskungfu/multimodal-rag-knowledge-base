@@ -390,7 +390,7 @@ def test_lifespan_disabled_and_enabled_timezone_shutdown():
 
 
 def test_actual_scheduler_job_uses_same_generation_boundary(env):
-    scheduler = build_scheduler(lambda: env.service)
+    scheduler = build_scheduler(lambda: env.service, calendar_factory=lambda: Mock(status=lambda: {"is_trading_day": True}))
     scheduler.get_job('daily-summary').func()
     assert env.repo.get('default_user', DAY, NOW)['status'] == 'completed'
     scheduler.get_job('daily-summary').func()

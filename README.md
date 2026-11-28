@@ -6,7 +6,7 @@
 
 通过 LangGraph 编排导入与查询，使用 BGE-M3 混合向量检索、RRF、BGE-Reranker 和独立行情数据。个人使用阶段免登录，不执行交易。完整需求状态及验证边界见 [需求验收清单](docs/requirements-acceptance.md)。
 
-使用说明：[个人档案与策略模式](docs/personal-settings.md)、[复盘记录](docs/trade-reviews.md)、[每日摘要](docs/daily-summary.md)、[全市场收盘采集](docs/market-collection.md)、[公共导入隐私](docs/public-import.md)。
+使用说明：[个人档案与策略模式](docs/personal-settings.md)、[复盘记录](docs/trade-reviews.md)、[每日摘要](docs/daily-summary.md)、[全市场收盘采集](docs/market-collection.md)、[BaoStock与交易日历](docs/baostock-and-calendar.md)、[公共导入隐私](docs/public-import.md)。
 
 ## 核心功能
 

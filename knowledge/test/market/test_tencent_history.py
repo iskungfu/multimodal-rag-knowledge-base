@@ -8,6 +8,7 @@ import mongomock
 
 from knowledge.market.adapters import EastmoneyAdapter, TencentAdapter
 from knowledge.market.batch import BatchQuotes
+from knowledge.market.baostock_source import BaoStockAdapter
 from knowledge.market.models import MarketUnavailable, market_symbol
 from knowledge.market.tencent_history import TencentHistoryAdapter
 from knowledge.market.repository import MarketQuoteRepository
@@ -158,11 +159,12 @@ def test_api_fallback_returns_historical_range_and_honest_warnings():
 
 def test_default_source_order_keeps_snapshot_as_last_resort():
     service = MarketService(MemoryRepository())
-    assert [adapter.name for adapter in service.adapters] == ["eastmoney", "tencent_history", "tencent"]
+    assert [adapter.name for adapter in service.adapters] == ["eastmoney", "baostock", "tencent_history", "tencent"]
 
 
 def test_batch_falls_through_failed_primary_history_without_faking_date(monkeypatch):
     monkeypatch.setattr(EastmoneyAdapter, "fetch_daily", Mock(side_effect=MarketUnavailable()))
+    monkeypatch.setattr(BaoStockAdapter, "fetch_daily", Mock(side_effect=MarketUnavailable()))
     fetch = Mock(side_effect=adapter_for().fetch_daily)
     monkeypatch.setattr(TencentHistoryAdapter, "fetch_daily", fetch)
     http = Mock()
@@ -173,11 +175,12 @@ def test_batch_falls_through_failed_primary_history_without_faking_date(monkeypa
     rows, failures = BatchQuotes(http=http).fetch(items, target, NOW, checkpoint)
     assert not failures and len(rows) == 1 and rows[0].date == target
     assert rows[0].source == "tencent_history" and rows[0].pe is None
-    assert fetch.call_count == 1 and checkpoint.call_count == 3
+    assert fetch.call_count == 1 and checkpoint.call_count == 4
 
 
 def test_batch_name_mismatch_remains_missing(monkeypatch):
     monkeypatch.setattr(EastmoneyAdapter, "fetch_daily", Mock(side_effect=MarketUnavailable()))
+    monkeypatch.setattr(BaoStockAdapter, "fetch_daily", Mock(side_effect=MarketUnavailable()))
     monkeypatch.setattr(TencentHistoryAdapter, "fetch_daily", Mock(side_effect=adapter_for().fetch_daily))
     http = Mock()
     http.get.side_effect = MarketUnavailable()

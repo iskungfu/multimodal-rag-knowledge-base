@@ -7,12 +7,13 @@ from datetime import datetime, timezone
 from knowledge.market.adapters import EastmoneyAdapter, TencentAdapter
 from knowledge.market.models import MarketUnavailable, date_window, market_symbol, validate_quote_batch
 from knowledge.market.tencent_history import TencentHistoryAdapter
+from knowledge.market.baostock_source import BaoStockAdapter
 
 
 class MarketService:
     def __init__(self, repository, adapters=None, *, now=None, clock=time.monotonic):
         self.repository = repository
-        self.adapters = adapters if adapters is not None else [EastmoneyAdapter(), TencentHistoryAdapter(), TencentAdapter()]
+        self.adapters = adapters if adapters is not None else [EastmoneyAdapter(), BaoStockAdapter(), TencentHistoryAdapter(), TencentAdapter()]
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.clock = clock
         self.lock = threading.Lock()

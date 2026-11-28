@@ -217,7 +217,7 @@ def test_actual_collection_scheduler_uses_service_and_stops(monkeypatch):
 
     async def check():
         app = FastAPI()
-        async with summary_lifespan(False)(app):
+        async with summary_lifespan(False, calendar_factory=lambda: Mock(status=lambda: {"is_trading_day": True}))(app):
             scheduler = app.state.collection_scheduler
             job = scheduler.get_job("market-collection")
             assert str(job.trigger.timezone) == "Asia/Shanghai" and job.max_instances == 1

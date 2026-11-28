@@ -7,17 +7,29 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from knowledge.market.models import SHANGHAI
+from knowledge.market.calendar import get_trading_calendar
 
 logger = logging.getLogger(__name__)
 
 
-def build_scheduler(service_factory, hour=15, minute=30):
+def verified_closed(calendar_factory=None):
+    try:
+        return (calendar_factory or get_trading_calendar)().status()["is_trading_day"] is False
+    except Exception:
+        logger.warning("交易日历未能核实，继续通过真实行情确认目标日期")
+        return False
+
+
+def build_scheduler(service_factory, hour=15, minute=30, *, calendar_factory=None):
     if not 0 <= hour <= 23 or not 0 <= minute <= 59 or (hour, minute) < (15, 15):
         raise ValueError("摘要调度时间须在 Asia/Shanghai 15:15 之后")
     scheduler = BackgroundScheduler(timezone=SHANGHAI)
 
     def generate():
         try:
+            if verified_closed(calendar_factory):
+                logger.info("交易日历确认休市，跳过自动摘要")
+                return
             service_factory().generate()
         except Exception:
             logger.warning("每日摘要任务未完成，可通过页面检查状态并手动重试")
@@ -28,7 +40,7 @@ def build_scheduler(service_factory, hour=15, minute=30):
     return scheduler
 
 
-def summary_lifespan(enabled=None, service_factory=None):
+def summary_lifespan(enabled=None, service_factory=None, calendar_factory=None):
     @asynccontextmanager
     async def lifespan(app):
         from knowledge.api.summary_api import get_summary_service
@@ -39,7 +51,7 @@ def summary_lifespan(enabled=None, service_factory=None):
         app.state.summary_scheduler = None
         if active:
             scheduler = build_scheduler(factory, int(os.getenv("DAILY_SUMMARY_HOUR", "15")),
-                                        int(os.getenv("DAILY_SUMMARY_MINUTE", "30")))
+                                        int(os.getenv("DAILY_SUMMARY_MINUTE", "30")), calendar_factory=calendar_factory)
             scheduler.start()
             app.state.summary_scheduler = scheduler
         collection_scheduler = None
@@ -49,6 +61,9 @@ def summary_lifespan(enabled=None, service_factory=None):
             def collect_market():
                 nonlocal collection_service
                 try:
+                    if verified_closed(calendar_factory):
+                        logger.info("交易日历确认休市，跳过自动全市场采集")
+                        return
                     collection_service = get_collection_service()
                     collection_service.start()
                 except Exception:
