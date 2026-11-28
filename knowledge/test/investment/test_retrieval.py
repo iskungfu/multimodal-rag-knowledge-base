@@ -77,3 +77,31 @@ def test_legacy_private_collection_never_falls_back(setup_retriever):
     with pytest.raises(ValueError):
         retriever.search("personal", [1, 0], {1: 1})
     assert not calls
+
+
+def test_mode_filters_before_search_and_rejects_out_of_mode_hit(setup_retriever, monkeypatch):
+    retriever, database, hits, calls = setup_retriever
+    from knowledge.utils import milvus_util
+    requests = []
+    original = milvus_util.create_hybrid_search_requests
+    def capture(*args, **kwargs):
+        result = original(*args, **kwargs)
+        requests.extend(result)
+        return result
+    monkeypatch.setattr(milvus_util, 'create_hybrid_search_requests', capture)
+    hits.append(hit('personal'))
+    database.documents.insert_one({'_id': 'doc', 'owner_id': 'default_user', 'doc_type': 'personal', 'status': 'completed'})
+    assert retriever.search('personal', [1, 0], {1: 1}, document_ids=['doc'])
+    assert len(requests) == 2 and all('document_id in ["doc"]' in request.expr for request in requests)
+    with pytest.raises(ValueError):
+        retriever.search('personal', [1, 0], {1: 1}, document_ids=['different'])
+    assert retriever.search('personal', [1, 0], {1: 1}, document_ids=[]) == []
+
+
+def test_public_summary_search_does_not_query_private_routes(setup_retriever):
+    retriever, database, hits, calls = setup_retriever
+    hits.append(hit('knowledge'))
+    routes = retriever.retrieve('投资知识', kinds=('knowledge',))
+    assert list(routes) == ['knowledge'] and routes['knowledge']['items'][0]['owner_id'] == 'public'
+    assert len(calls) == 1 and calls[0]['doc_type'] == 'knowledge'
+    retriever.review_index.search.assert_not_called()

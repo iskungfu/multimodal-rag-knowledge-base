@@ -238,7 +238,7 @@ class Acceptance:
         self.mongo_names, self.vector_names = [], []
         self.collections = {kind: prefix + "_" + kind for kind in KINDS}
         self.names = {name: prefix + "_" + name for name in
-                      ("documents", "reviews", "history", "stocks", "indices", "summaries", "watches")}
+                      ("documents", "reviews", "history", "stocks", "indices", "summaries", "watches", "settings")}
         self.stack = ExitStack()
 
     def check(self, name, result):
@@ -495,18 +495,25 @@ class Acceptance:
         from knowledge.summary.indices import IndexService, IndexRepository
         from knowledge.summary.repository import SummaryRepository, WatchlistRepository
         from knowledge.summary.strategies import PersonalStrategyRetriever
+        from knowledge.summary.knowledge import PublicKnowledgeRetriever
+        from knowledge.personalization.settings import SettingsRepository
+        from knowledge.api.settings_api import get_repository as get_settings_repository
         from knowledge.utils import mongo_history_util
         from knowledge.utils.clients.storage_clients import StorageClients
         self.market = MarketService(MarketQuoteRepository(self.db[self.names["stocks"]]))
         self.risk = ObservedRisk(RiskService(market_factory=lambda: self.market))
         self.selector = ObservedSelector(EvidenceSelector())
         self.reranker = ObservedReranker(rerank)
-        self.assistant = ObservedAssistant(InvestmentAssistant(self.real_retriever, self.selector, self.reranker))
+        self.settings_repository = SettingsRepository(self.db[self.names["settings"]], self.documents)
+        self.assistant = ObservedAssistant(InvestmentAssistant(self.real_retriever, self.selector, self.reranker,
+                                                               settings=self.settings_repository.read))
         self.query_service = QueryService(risk=self.risk, investment=self.assistant)
         indices = IndexService(IndexRepository(self.db[self.names["indices"]]))
         summary = SummaryService(SummaryRepository(self.db[self.names["summaries"]]),
                                  WatchlistRepository(self.db[self.names["watches"]]), indices, self.market,
-                                 PersonalStrategyRetriever(self.documents, self.vectors["personal"]))
+                                 PersonalStrategyRetriever(self.documents, self.vectors["personal"]),
+                                 knowledge=PublicKnowledgeRetriever(self.real_retriever), settings=self.settings_repository.read)
+        self.summary = summary
         self.stack.enter_context(patch.object(mongo_history_util, "_get_collection", lambda: self.history))
         self.stack.enter_context(patch.object(StorageClients, "get_mongo_client", lambda: self.mongo))
         self.stack.enter_context(patch.object(StorageClients, "get_milvus_client", lambda: self.milvus))
@@ -518,7 +525,120 @@ class Acceptance:
         app.dependency_overrides[get_review_service] = lambda: self.review_service
         app.dependency_overrides[get_strategy_service] = lambda: self.strategy_service
         app.dependency_overrides[summary_api.get_summary_service] = lambda: summary
+        app.dependency_overrides[get_settings_repository] = lambda: self.settings_repository
         self.app = app
+
+    def personal_mvp_checks(self):
+        from datetime import date, time as day_time
+        from fastapi.testclient import TestClient
+        from knowledge.market.models import SHANGHAI, date_window
+        from knowledge.summary.scheduler import build_scheduler
+        from knowledge.summary.indices import EastmoneyIndexAdapter
+        from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
+        with TestClient(self.app) as api:
+            initial = api.get('/investor-settings').json()
+            self.check('settings_initial_defaults', initial['revision'] == 0 and not initial['modes'])
+            catalog = api.get('/investor-settings/documents').json()['items']
+            self.check('settings_catalog_completed_own_only', {item['id'] for item in catalog} == {self.personal_id})
+            response = api.post('/strategies/text', json={'title': '另一套策略', 'text':
+                '# 另一套策略的适用前提\n只有完成现金流复核才考虑执行赤鹭独立4268，不得与其他模式混用。'})
+            second_id = response.json()['task_id']
+            self.check('second_mode_real_import', api.get('/strategies/' + second_id).json()['status'] == 'completed')
+            first_mode, second_mode, empty_mode = (str(uuid.uuid4()) for index in range(3))
+            config = {'revision': 0, 'profile': {'risk_preference': 'cautious', 'horizon': 'long',
+                'preferred_sectors': ['消费'], 'notes': '手机号' + PHONE}, 'modes': [
+                {'id': first_mode, 'name': '回踩纪律', 'document_ids': [self.personal_id]},
+                {'id': second_mode, 'name': '现金流纪律', 'document_ids': [second_id]},
+                {'id': empty_mode, 'name': '暂不使用个人策略', 'document_ids': []}], 'active_mode_id': first_mode}
+            response = api.put('/investor-settings', json=config)
+            self.check('settings_real_save', response.status_code == 200)
+            saved = response.json()
+            self.safe('settings_write_privacy', self.db[self.names['settings']].find_one())
+            self.check('settings_read_roundtrip', api.get('/investor-settings').json() == saved)
+            self.check('settings_conflict', api.put('/investor-settings', json=config).status_code == 409)
+            for label, mode, document_id, marker, excluded in (
+                    ('first', first_mode, self.personal_id, '青鹭7391', '赤鹭独立4268'),
+                    ('second', second_mode, second_id, '赤鹭独立4268', '青鹭7391')):
+                saved['active_mode_id'] = mode
+                saved = api.put('/investor-settings', json=saved).json()
+                answer, session = self.api_query(api, 'mode_' + label, '按当前策略模式和公共知识核对我的操作前提。')
+                state = self.assistant.states[-1]
+                self.check('mode_' + label + '_real_filter', bool(state['routes']['personal']['items']) and all(
+                    item['document_id'] == document_id for item in state['routes']['personal']['items']))
+                self.check('mode_' + label + '_real_model', state['selection_status'] == 'completed'
+                           and state['rerank_status'] == 'completed' and marker in answer and excluded not in answer)
+                self.check('mode_' + label + '_profile', '谨慎' in answer and '长期' in answer and PHONE not in answer)
+            saved['active_mode_id'] = empty_mode
+            saved = api.put('/investor-settings', json=saved).json()
+            state = self.assistant.answer('核对我的个人策略和公共投资知识')
+            self.check('empty_mode_no_fallback', state['routes']['personal']['status'] == 'empty'
+                       and '青鹭7391' not in state['answer'] and '赤鹭独立4268' not in state['answer']
+                       and state['routes']['knowledge']['status'] == 'retrieved')
+            saved['active_mode_id'] = first_mode
+            saved = api.put('/investor-settings', json=saved).json()
+            old = self.review_repo.get(self.review_id, OWNER)
+            edited_text = '纠正：今天仍未成交，已撤销所有计划订单。蓝鹭纠错7359提醒先等回踩。手机号' + PHONE
+            payload = {'text': edited_text, 'revision': old.get('revision', 1), 'request_id': str(uuid.uuid4())}
+            edited = api.put('/reviews/' + self.review_id, json=payload)
+            self.check('review_edit_real_models', edited.status_code == 200
+                       and edited.json()['extraction_status'] == 'succeeded' and edited.json()['index_status'] == 'completed')
+            self.check('review_edit_not_execution', all(event['status'] != 'executed' for event in edited.json()['extraction']['events']))
+            self.safe('review_edit_privacy', edited.json())
+            self.check('review_edit_old_version_hidden', self.review_repo.published(self.review_id, OWNER, old['index_version']) is None)
+            self.check('review_edit_idempotency', api.put('/reviews/' + self.review_id, json=payload).json()['revision'] == payload['revision'] + 1)
+            self.check('review_edit_conflict', api.put('/reviews/' + self.review_id,
+                json={**payload, 'request_id': str(uuid.uuid4())}).status_code == 409)
+            recalled = self.real_retriever.retrieve('蓝鹭纠错7359的最新复盘')['review']['items']
+            self.check('review_edit_new_text_recalled', any('蓝鹭纠错7359' in item['content'] for item in recalled)
+                       and all('白鹭9527' not in item['content'] for item in recalled))
+            self.summary.add_watch('000001')
+            now = self.summary.now()
+            _, end = date_window(None, None, now)
+            rows = EastmoneyIndexAdapter().fetch_daily('sh000001', end - timedelta(days=120), end, now)
+            day = rows[-1].date
+            self.report['summary_date'] = day.isoformat()
+            response = api.post('/daily-summaries/generate', json={'date': str(day), 'retry': True})
+            self.check('mvp_summary_accepted', response.status_code == 202)
+            record = api.get('/daily-summaries/' + str(day)).json()
+            self.report['personal_summary'] = {'status': record.get('status'), 'error': record.get('error'),
+                                              'knowledge_status': record.get('result', {}).get('knowledge_status')}
+            self.check('mvp_summary_completed', record['status'] == 'completed')
+            result = record['result']
+            self.check('mvp_summary_real_public_knowledge', result['knowledge_status'] == 'retrieved'
+                       and any(item['document_id'] == self.knowledge_id for item in result['knowledge'])
+                       and '松柏6284' in result['answer'])
+            self.check('mvp_summary_real_mode', result['strategies'] and all(item['document_id'] == self.personal_id
+                       for item in result['strategies']) and '赤鹭独立4268' not in result['answer'])
+            self.check('mvp_summary_profile_snapshot', result['personalization']['revision'] == saved['revision']
+                       and result['personalization']['mode_id'] == first_mode)
+            self.answer_policy('mvp_summary', result['answer'])
+            saved['active_mode_id'] = second_mode
+            saved = api.put('/investor-settings', json=saved).json()
+            self.check('settings_do_not_rewrite_history', api.get('/daily-summaries/' + str(day)).json()['result'] == result)
+            self.db[self.names['summaries']].update_one({'owner_id': OWNER, 'date': str(day)},
+                                                       {'$set': {'status': 'failed', 'error': '验收重试'}})
+            original_now = self.summary.now
+            self.summary.now = lambda: datetime.combine(day, day_time(23), SHANGHAI)
+            scheduler = build_scheduler(lambda: self.summary)
+            finished = threading.Event()
+            scheduler.add_listener(lambda event: finished.set() if event.job_id == 'mvp-once' else None,
+                                   EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+            scheduler.add_job(scheduler.get_job('daily-summary').func, 'date', id='mvp-once')
+            scheduler.start()
+            try:
+                deadline = time.monotonic() + 270
+                while not finished.wait(30) and time.monotonic() < deadline:
+                    print('等待隔离摘要调度验收完成…', flush=True)
+                scheduled = self.db[self.names['summaries']].find_one({'owner_id': OWNER, 'date': str(day)})
+                self.check('mvp_scheduler_current_mode', finished.is_set() and scheduled['status'] == 'completed'
+                           and scheduled['result']['personalization']['mode_id'] == second_mode
+                           and bool(scheduled['result']['strategies']) and all(item['document_id'] == second_id
+                               for item in scheduled['result']['strategies']))
+                self.check('mvp_scheduler_public_knowledge', bool(scheduled['result']['knowledge']))
+            finally:
+                scheduler.shutdown(wait=True)
+                self.summary.now = original_now
+            self.report['coverage']['personal_mvp'] = True
 
     def selected_checks(self, name, state, require_facts=False):
         if state.get("selection_status") != "completed":
@@ -827,6 +947,8 @@ class Acceptance:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", action="store_true", help="使用本机已有 BGE/reranker、真实 LLM/行情/API")
+    parser.add_argument("--personal-mvp", action="store_true", help="额外验收档案、模式切换、复盘纠错和摘要公共知识")
+    parser.add_argument("--personal-mvp-only", action="store_true", help="只运行本轮新增能力及其真实依赖，不重复旧三路完整验收")
     parser.add_argument("--serve", action="store_true", help="全链路检查通过后启动浏览器验收服务")
     parser.add_argument("--port", type=int, default=8003)
     parser.add_argument("--stop-file", type=Path, help="检测到该文件后正常停止服务并清理测试资源")
@@ -834,6 +956,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.serve and not args.host:
         parser.error("--serve 需要 --host")
+    if args.personal_mvp and not args.host:
+        parser.error("--personal-mvp 需要 --host")
+    if args.personal_mvp_only and not (args.host and args.personal_mvp):
+        parser.error("--personal-mvp-only 需要 --host --personal-mvp")
     if args.stop_file and not args.serve:
         parser.error("--stop-file 需要 --serve")
     if not 1 <= args.port <= 65535:
@@ -851,6 +977,7 @@ def main(argv=None):
     prefix = "investment_accept_" + uuid.uuid4().hex
     report = {"run_id": prefix, "mode": "host" if args.host else "storage", "checks": {}, "cleanup": {},
               "coverage": {}, "passed": False, "full_acceptance": False}
+    report['scope'] = 'personal-mvp' if args.personal_mvp_only else 'full'
     started = time.monotonic()
     acceptance = None
     sys.dont_write_bytecode = True
@@ -871,8 +998,11 @@ def main(argv=None):
                     acceptance.seed()
                     acceptance.retrieval_checks()
                     acceptance.build_app()
-                    acceptance.host_checks()
-                    acceptance.review_recovery_checks()
+                    if not args.personal_mvp_only:
+                        acceptance.host_checks()
+                        acceptance.review_recovery_checks()
+                    if args.personal_mvp:
+                        acceptance.personal_mvp_checks()
                     if args.serve:
                         acceptance.serve()
                 report["passed"] = True
@@ -887,7 +1017,8 @@ def main(argv=None):
         print("验收失败；异常详情已隐藏，类型：" + type(exc).__name__, flush=True)
     finally:
         report["passed"] = report["passed"] and bool(report["cleanup"]) and all(report["cleanup"].values())
-        report["full_acceptance"] = args.host and report["passed"] and not report.get("pending")
+        report["full_acceptance"] = args.host and report["passed"] and not report.get("pending") and not args.personal_mvp_only
+        report["personal_mvp_acceptance"] = args.personal_mvp and report["passed"] and report['coverage'].get('personal_mvp', False)
         report["seconds"] = round(time.monotonic() - started, 2)
         if not args.host:
             report["pending"] = ["BGE-M3", "三路召回/RRF", "reranker", "selector/LLM", "API/SSE/history", "真实行情"]

@@ -36,7 +36,8 @@ class QueryService:
         self.graph = graph
         if investment is None:
             from knowledge.service.investment_service import InvestmentAssistant
-            investment = InvestmentAssistant()
+            from knowledge.personalization.settings import current_settings
+            investment = InvestmentAssistant(settings=current_settings)
         self.investment = investment
 
     # ── ID 生成 ──

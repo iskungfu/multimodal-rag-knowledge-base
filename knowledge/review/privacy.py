@@ -112,6 +112,6 @@ def redact_value(value):
         return [redact_value(item) for item in value]
     if isinstance(value, dict):
         identifiers = {"_id", "id", "task_id", "owner_id", "document_id", "review_id", "session_id", "chunk_id",
-                       "index_version", "content_hash"}
+                       "index_version", "content_hash", "mode_id", "active_mode_id", "document_ids"}
         return {key: item if key in identifiers else redact_value(item) for key, item in value.items()}
     return value

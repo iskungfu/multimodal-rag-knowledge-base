@@ -1,4 +1,4 @@
-import {saveReview, fetchReviews, indexReview} from './api.js';
+import {saveReview, fetchReviews, indexReview, editReview, fetchReview, createRequestId as requestId} from './api.js';
 
 const form = document.getElementById('reviewForm');
 const input = document.getElementById('reviewText');
@@ -22,15 +22,6 @@ function node(tag, text) {
     const element = document.createElement(tag);
     element.textContent = text;
     return element;
-}
-
-function requestId() {
-    if (crypto.randomUUID) return crypto.randomUUID();
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    bytes[6] = (bytes[6] & 15) | 64;
-    bytes[8] = (bytes[8] & 63) | 128;
-    const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function renderReview(review) {
@@ -72,14 +63,16 @@ function renderReview(review) {
             indexing.append(node('p', `可重试时间：${new Date(review.index_retry_after).toLocaleString('zh-CN')}，届时请刷新。`));
         }
         retry.addEventListener('click', async () => {
-            if (retry.disabled) return;
+            if (retry.disabled || article.dataset.editing) return;
+            article.dataset.indexing = 'true';
+            edit.disabled = true;
             retry.disabled = true;
             retry.textContent = '正在建立索引…';
             indexing.setAttribute('aria-busy', 'true');
             status.textContent = '正在建立复盘索引，原文已保存。';
             try {
                 const updated = await indexReview(review.id);
-                article.replaceWith(renderReview(updated));
+                if (!article.dataset.editing) article.replaceWith(renderReview(updated));
                 status.textContent = updated.warning || indexStates[updated.index_status] || '请刷新查看索引状态。';
             } catch (error) {
                 retry.textContent = '重试索引';
@@ -87,18 +80,111 @@ function renderReview(review) {
                 status.textContent = `${error.message || '索引暂不可用。'} 复盘原文已保存，请刷新查看状态。`;
             } finally {
                 indexing.removeAttribute('aria-busy');
+                delete article.dataset.indexing;
+                edit.disabled = false;
             }
         });
         indexing.append(retry);
     }
     article.append(indexing, node('p', review.disclaimer));
+    const edit = node('button', '编辑原文 / 纠错');
+    edit.type = 'button';
+    edit.className = 'btn btn-ghost btn-sm';
+    edit.addEventListener('click', () => {
+        if (article.dataset.editing || article.dataset.indexing) return;
+        article.dataset.editing = 'true';
+        edit.disabled = true;
+        const indexButtons = Array.from(indexing.querySelectorAll('button'));
+        const disabledStates = indexButtons.map((button) => button.disabled);
+        indexButtons.forEach((button) => { button.disabled = true; });
+        const editor = document.createElement('form');
+        const label = node('label', '修改自然语言复盘，保存后重新抽取并更新检索索引');
+        const text = document.createElement('textarea');
+        text.id = `review-edit-${review.id}`;
+        label.htmlFor = text.id;
+        text.value = review.original_text;
+        text.rows = 5;
+        text.maxLength = 10000;
+        text.required = true;
+        let revision = review.revision || 1;
+        let editId = requestId();
+        text.addEventListener('input', () => { editId = requestId(); });
+        const feedback = node('p', `正在编辑版本 ${revision}，输入内容在保存失败时保留。`);
+        feedback.setAttribute('role', 'status');
+        const submit = node('button', '保存纠错并重新抽取');
+        submit.className = 'btn btn-primary btn-sm';
+        const cancel = node('button', '取消编辑');
+        cancel.type = 'button';
+        cancel.className = 'btn btn-ghost btn-sm';
+        cancel.addEventListener('click', () => {
+            editor.remove();
+            delete article.dataset.editing;
+            edit.disabled = false;
+            indexButtons.forEach((button, position) => { button.disabled = disabledStates[position]; });
+            edit.focus();
+        });
+        const latest = node('button', '查看已保存版本');
+        latest.type = 'button';
+        latest.className = 'btn btn-ghost btn-sm';
+        const comparison = document.createElement('div');
+        latest.addEventListener('click', async () => {
+            latest.disabled = true;
+            try {
+                const current = await fetchReview(review.id);
+                comparison.replaceChildren(node('p', `已保存版本 ${current.revision}：${current.original_text}`));
+                if (current.revision !== revision) {
+                    const adopt = node('button', '已核对，以此版本继续保存我的修改');
+                    adopt.type = 'button';
+                    adopt.className = 'btn btn-ghost btn-sm';
+                    adopt.addEventListener('click', () => {
+                        revision = current.revision;
+                        editId = requestId();
+                        feedback.textContent = `将基于版本 ${revision} 保存；你的输入保持不变。`;
+                        adopt.remove();
+                    });
+                    comparison.append(adopt);
+                }
+            } catch (error) { feedback.textContent = error.message; }
+            finally { latest.disabled = false; }
+        });
+        editor.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (submit.disabled || !text.value.trim()) return;
+            submit.disabled = cancel.disabled = latest.disabled = text.disabled = true;
+            editor.setAttribute('aria-busy', 'true');
+            feedback.textContent = '正在保存新原文、重新抽取和更新索引…';
+            try {
+                const updated = await editReview(review.id, text.value, revision, editId);
+                const replacement = renderReview(updated);
+                article.replaceWith(replacement);
+                status.textContent = updated.warning || `纠错已保存为版本 ${updated.revision}；请核对抽取与索引状态。`;
+                replacement.querySelector('button')?.focus();
+            } catch (error) { feedback.textContent = error.message; }
+            finally {
+                submit.disabled = cancel.disabled = latest.disabled = text.disabled = false;
+                editor.removeAttribute('aria-busy');
+            }
+        });
+        editor.append(label, text, submit, cancel, latest, feedback, comparison);
+        article.append(editor);
+        text.focus();
+    });
+    article.append(edit);
     return article;
 }
 
 async function loadReviews() {
+    if (list.querySelector('[data-editing]')) {
+        status.textContent = '正在编辑的内容已保留，请使用该记录的“查看已保存版本”，或结束编辑后刷新列表。';
+        return;
+    }
     refresh.disabled = true;
     try {
         const response = await fetchReviews();
+        if (list.querySelector('[data-editing]')) {
+            status.textContent = '刷新结果已到达，正在编辑的内容已保留；结束编辑后可再次刷新。';
+            return;
+        }
         list.replaceChildren(...response.items.map(renderReview));
         if (!response.items.length) list.append(node('p', '还没有复盘记录。'));
         loaded = true;
@@ -111,6 +197,10 @@ input.addEventListener('input', () => { draftId = null; });
 form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (save.disabled || !input.value.trim()) return;
+    if (list.querySelector('[data-editing]')) {
+        status.textContent = '请先保存或取消正在编辑的复盘，再提交新记录；两处输入均已保留。';
+        return;
+    }
     draftId ||= requestId();
     save.disabled = true;
     input.disabled = true;

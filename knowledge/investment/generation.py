@@ -66,6 +66,9 @@ def parse_source_selections(content):
 
 
 class EvidenceSelector:
+    def __init__(self, timeout=90, attempts=2):
+        self.timeout, self.attempts = timeout, attempts
+
     def select(self, query, documents, market):
         prompt = (
             '仅返回JSON：{"selections":[{"reference":"E1"}]}。'
@@ -80,8 +83,8 @@ class EvidenceSelector:
             for index, document in enumerate(documents)
         ], "market": market}
         with OpenAI(base_url=os.environ["OPEN_API_BASE"], api_key=os.environ["OPEN_API_KEY"],
-                    timeout=90, max_retries=0) as client:
-            for attempt in range(2):
+                    timeout=self.timeout, max_retries=0) as client:
+            for attempt in range(self.attempts):
                 try:
                     response = client.chat.completions.create(
                         model=os.environ["LLM_DEFAULT_MODEL"], temperature=0, max_tokens=3500,
@@ -94,7 +97,7 @@ class EvidenceSelector:
                     validate_selections(result, documents, market)
                     return result
                 except Exception:
-                    if attempt == 1:
+                    if attempt == self.attempts - 1:
                         raise
 
     @staticmethod

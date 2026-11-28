@@ -1,4 +1,5 @@
 """每路独立失败；Milvus范围过滤后再次核验来源和Mongo可见状态。"""
+import json
 import os
 
 from knowledge.review.indexing import ReviewIndexer, embed_texts
@@ -37,22 +38,25 @@ class InvestmentRetriever:
             "review": os.getenv("REVIEW_COLLECTION", "review_chunks_v1"),
         }
 
-    def retrieve(self, query):
+    def retrieve(self, query, *, document_ids=None, kinds=KINDS):
         routes = {}
         try:
             embedded = self.embed([query])
             dense, sparse = embedded["dense"][0], embedded["sparse"][0]
         except Exception:
-            return {kind: {"status": "failed", "items": []} for kind in KINDS}
-        for kind in KINDS:
+            return {kind: {"status": "failed", "items": []} for kind in kinds}
+        for kind in kinds:
             try:
-                items = self.search(kind, dense, sparse)
+                items = (self.search(kind, dense, sparse, document_ids=document_ids)
+                         if kind == "personal" and document_ids is not None else self.search(kind, dense, sparse))
                 routes[kind] = {"status": "retrieved" if items else "empty", "items": items}
             except Exception:
                 routes[kind] = {"status": "failed", "items": []}
         return routes
 
-    def search(self, kind, dense, sparse):
+    def search(self, kind, dense, sparse, *, document_ids=None):
+        if kind == "personal" and document_ids == []:
+            return []
         if kind == "review":
             if self.review_index is None:
                 self.review_index = ReviewIndexer(collection=self.collections["review"])
@@ -80,8 +84,10 @@ class InvestmentRetriever:
         fields = ["title", "content"]
         if scoped:
             fields += ["owner_id", "doc_type", "document_id"]
+        expression = ("document_id in " + json.dumps(document_ids)
+                      if kind == "personal" and document_ids is not None else None)
         hits = execute_hybrid_search_query(client, collection,
-            create_hybrid_search_requests(dense, sparse, limit=16), limit=16,
+            create_hybrid_search_requests(dense, sparse, limit=16, expr=expression), limit=16,
             owner_id=OWNER if kind != "knowledge" else "public", doc_type=kind, output_fields=fields)
         items, seen = [], set()
         for hit in (hits[0] if hits else []):
@@ -93,6 +99,8 @@ class InvestmentRetriever:
             if hit.get("id") is None or not isinstance(content, str) or not content.strip() or len(content) > 12000:
                 continue
             if kind == "personal":
+                if document_ids is not None and identifier not in document_ids:
+                    raise ValueError("返回策略不属于当前模式")
                 if not identifier or not repository.find_one({"_id": identifier, "owner_id": OWNER,
                         "doc_type": "personal", "status": "completed"}, {"_id": 1}):
                     continue

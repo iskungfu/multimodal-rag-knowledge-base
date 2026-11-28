@@ -72,6 +72,90 @@ def test_api_empty_generate_read_history_and_no_duplicate(env):
     assert len(env.client.get('/daily-summaries').json()['items']) == 1
 
 
+def test_summary_quotes_public_knowledge_and_keeps_same_chunk_ids_distinct(env):
+    public = {'source': 'knowledge', 'owner_id': 'public', 'collection': 'public_test',
+              'document_id': 'book', 'chunk_id': '13812345678', 'title': '自建知识',
+              'content': '分散投资不能消除所有风险。手机号13900001234。'}
+    env.service.knowledge = Mock()
+    env.service.knowledge.retrieve.return_value = {'status': 'retrieved', 'items': [public]}
+    env.service.knowledge_model = Mock()
+    env.service.knowledge_model.select.return_value = {'selections': [
+        {'reference': 'E1', 'quote': public['content'], 'evidence_ids': []}]}
+    personal = {**public, 'source': 'personal', 'owner_id': 'default_user', 'document_id': 'strategy',
+                'content': '只有完整条件满足才考虑执行。'}
+    env.strategies.retrieve.return_value = {'status': 'retrieved', 'items': [personal]}
+    env.model.select.return_value = [personal]
+    result = env.service.generate(DAY)['result']
+    assert result['knowledge_status'] == 'retrieved'
+    assert result['knowledge'][0]['document_id'] == 'book'
+    assert result['strategies'][0]['document_id'] == 'strategy'
+    assert '公共知识' in result['answer'] and '分散投资不能消除所有风险' in result['answer']
+    assert '[chunk_id=13812345678]' in result['answer'] and '13900001234' not in str(result)
+    assert result['answer'].count(DISCLAIMER) == 1
+
+
+@pytest.mark.parametrize('failure', ['retrieval', 'model', 'foreign', 'forged_reference'])
+def test_public_knowledge_failure_does_not_invent_citations_or_hide_market(env, failure):
+    public = {'source': 'knowledge', 'owner_id': 'public', 'chunk_id': 'book-id',
+              'collection': 'public', 'document_id': 'book', 'title': '书籍', 'content': '分散投资。'}
+    env.service.knowledge = Mock()
+    env.service.knowledge.retrieve.return_value = {'status': 'retrieved', 'items': [public]}
+    env.service.knowledge_model = Mock()
+    env.service.knowledge_model.select.return_value = {'selections': [{'reference': 'E99', 'quote': '伪造事实'}]}
+    if failure == 'retrieval':
+        env.service.knowledge.retrieve.side_effect = RuntimeError('private-token')
+    elif failure == 'model':
+        env.service.knowledge_model.select.side_effect = RuntimeError('private-token')
+    elif failure == 'foreign':
+        public['owner_id'] = 'another_owner'
+    record = env.service.generate(DAY)
+    assert record['status'] == 'completed' and record['result']['knowledge_status'] == 'failed'
+    assert not record['result']['knowledge'] and '上证指数' in record['result']['answer']
+    assert all(value not in str(record) for value in ('private-token', 'book-id', '伪造事实'))
+
+
+def test_summary_snapshots_profile_and_mode_without_modifying_risk(env):
+    from uuid import uuid4
+    mode_id, document_id = str(uuid4()), str(uuid4())
+    env.service.settings = lambda: {'revision': 2, 'profile': {'risk_preference': 'adventurous'},
+        'modes': [{'id': mode_id, 'name': '测试模式', 'document_ids': [document_id]}], 'active_mode_id': mode_id}
+    record = env.service.generate(DAY)
+    assert record['status'] == 'completed'
+    assert env.strategies.retrieve.call_args.kwargs['document_ids'] == [document_id]
+    assert record['result']['personalization']['revision'] == 2
+    assert '积极' in record['result']['answer']
+    first_levels = [item['level'] for item in record['result']['indices']]
+    env.service.settings = lambda: {'profile': {'risk_preference': 'cautious'}}
+    changed = env.service.generate(DAY, retry=True)['result']
+    assert [item['level'] for item in changed['indices']] == first_levels
+    assert record['result']['personalization']['mode_name'] == '测试模式'
+
+
+def test_summary_personal_selector_receives_changed_preference_with_same_candidates(env):
+    personal = {'source': 'personal', 'owner_id': 'default_user', 'document_id': 'strategy',
+                'chunk_id': 'personal-source', 'title': '条件策略', 'content': '如果满足前提才执行。'}
+    env.strategies.retrieve.return_value = {'status': 'retrieved', 'items': [personal]}
+    env.model.select.return_value = [personal]
+    env.service.settings = lambda: {'profile': {'risk_preference': 'cautious'}}
+    original = env.service.generate(DAY)['result']
+    first = env.model.select.call_args
+    env.service.settings = lambda: {'profile': {'risk_preference': 'adventurous'}}
+    changed = env.service.generate(DAY, retry=True)['result']
+    second = env.model.select.call_args
+    assert first.args == second.args
+    assert first.kwargs['profile_context']['profile']['risk_preference'] == 'cautious'
+    assert second.kwargs['profile_context']['profile']['risk_preference'] == 'adventurous'
+    assert original['indices'] == changed['indices']
+
+
+def test_summary_settings_failure_preserves_last_success(env):
+    result = env.service.generate(DAY)['result']
+    env.service.settings = Mock(side_effect=RuntimeError('private-token'))
+    record = env.service.generate(DAY, retry=True)
+    assert record['status'] == 'failed' and record['result'] == result
+    assert '档案读取失败' in record['error'] and 'private-token' not in str(record)
+
+
 @pytest.mark.parametrize('day,hour', [('2026-11-27', 14), ('2026-11-28', 16), ('2026-11-29', 16), ('2026-11-30', 16), ('2025-01-01', 16)])
 def test_reject_unclosed_weekend_future_old_dates(env, day, hour):
     env.service.now = lambda: NOW.replace(hour=hour)

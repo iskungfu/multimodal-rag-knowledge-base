@@ -48,6 +48,44 @@
 
 <main class="chat-shell" id="main">
     <div class="chat-scroll" id="scroller">
+        <details class="review-panel settings-panel" id="settingsPanel">
+            <summary>用户档案与策略模式</summary>
+            <p class="answer-note">设置你的偏好，并选择这次使用哪些策略文档。影响后续问答和新生成的摘要；历史内容保留原样。</p>
+            <form id="settingsForm">
+                <fieldset id="settingsFields" disabled>
+                    <legend>投资偏好</legend>
+                    <div class="settings-grid">
+                        <label>风险偏好<select id="riskPreference"><option value="unspecified">暂不设置</option><option value="cautious">谨慎</option><option value="balanced">均衡</option><option value="adventurous">积极</option></select></label>
+                        <label>投资期限<select id="investmentHorizon"><option value="unspecified">暂不设置</option><option value="short">短期</option><option value="medium">中期</option><option value="long">长期</option></select></label>
+                    </div>
+                    <label for="preferredSectors">偏好板块（逗号分隔，最多 10 个）</label>
+                    <input id="preferredSectors" maxlength="410" placeholder="例如：消费、科技">
+                    <label for="profileNotes">补充偏好（可选）</label>
+                    <textarea id="profileNotes" rows="2" maxlength="1000" placeholder="例如：更关注长期风险，尽量避免频繁交易"></textarea>
+                    <p class="answer-note">这是个人偏好，不是风险承受能力测评，也不会降低个股或大盘的风险等级。</p>
+                    <label for="activeStrategyMode">当前策略模式</label>
+                    <select id="activeStrategyMode"><option value="">全部个人策略</option></select>
+                    <div class="summary-controls">
+                        <button class="btn btn-primary btn-sm" type="submit">保存偏好并应用模式</button>
+                    </div>
+                    <details id="modeEditor">
+                        <summary>管理策略模式</summary>
+                        <label for="editingMode">选择要编辑的模式</label>
+                        <select id="editingMode"><option value="">新建模式</option></select>
+                        <label for="modeName">模式名称</label>
+                        <input id="modeName" maxlength="60" placeholder="例如：价值投资、短线纪律">
+                        <fieldset><legend>绑定已导入的策略文档</legend><div id="modeDocuments" class="mode-documents"></div></fieldset>
+                        <p class="answer-note">策略内容仍通过文档导入。空模式不会使用其他模式的策略；公共知识和复盘仍参与检索。</p>
+                        <div class="summary-controls">
+                            <button id="modeSave" class="btn btn-primary btn-sm" type="button">保存并使用此模式</button>
+                            <button id="modeDelete" class="btn btn-ghost btn-sm" type="button" disabled>删除此模式</button>
+                        </div>
+                    </details>
+                </fieldset>
+            </form>
+            <button id="settingsReload" class="btn btn-ghost btn-sm" type="button">重新加载已保存配置</button>
+            <p id="settingsStatus" role="status" aria-live="polite"></p>
+        </details>
         <details class="review-panel summary-panel" id="summaryPanel" open>
             <summary>每日投资摘要与关注股票</summary>
             <p class="answer-note">Asia/Shanghai 收盘后生成；离线期间可手动补生成。关注列表不代表实际持仓。</p>
@@ -151,5 +189,6 @@
 <script type="module" src="/front/assets/js/chat.js"></script>
 <script type="module" src="/front/assets/js/reviews.js"></script>
 <script type="module" src="/front/assets/js/summaries.js"></script>
+<script type="module" src="/front/assets/js/settings.js"></script>
 </body>
 </html>

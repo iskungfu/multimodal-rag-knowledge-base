@@ -24,6 +24,7 @@ class ReviewRepository:
             "_id": review_id, "owner_id": owner_id, "doc_type": "review", "original_text": text,
             "extraction": None, "extraction_status": "pending", "extraction_error": None,
             "index_status": "pending", "index_attempts": 0,
+            "revision": 1,
             "created_at": now, "updated_at": now,
         }
         try:
@@ -35,7 +36,7 @@ class ReviewRepository:
                 raise ReviewConflict("请求编号已用于其他复盘") from None
             return existing, False
 
-    def finish(self, review_id, owner_id, extraction, error):
+    def finish(self, review_id, owner_id, extraction, error, *, revision=None):
         changes = {
             "extraction": extraction, "extraction_status": "failed" if error else "succeeded",
             "extraction_error": error, "updated_at": datetime.now(timezone.utc),
@@ -43,8 +44,44 @@ class ReviewRepository:
             "index_lease_until": None, "index_retry_after": None, "index_error": None,
             "index_attempts": 0, "index_window": None,
         }
-        self.collection.update_one({"_id": review_id, "owner_id": owner_id}, {"$set": changes})
-        return changes
+        scope = {"_id": review_id, "owner_id": owner_id}
+        if revision is not None:
+            scope.update(self.revision_scope(revision))
+        result = self.collection.update_one(scope, {"$set": changes})
+        return changes if result.matched_count else None
+
+    @staticmethod
+    def revision_scope(revision):
+        return {"$or": [{"revision": 1}, {"revision": {"$exists": False}}]} if revision == 1 else {"revision": revision}
+
+    def edit(self, review_id, owner_id, text, revision, request_id):
+        scope = {"_id": review_id, "owner_id": owner_id, "doc_type": "review"}
+        existing = self.collection.find_one(scope)
+        if existing is None:
+            return None, False
+
+        def same_request(document):
+            if document.get("edit_request_id") != request_id:
+                return False
+            if document["original_text"] != text or document.get("revision") != revision + 1:
+                raise ReviewConflict
+            return True
+
+        if same_request(existing):
+            return existing, False
+        updated = self.collection.find_one_and_update({**scope, **self.revision_scope(revision)}, {"$set": {
+            "original_text": text, "revision": revision + 1, "edit_request_id": request_id,
+            "extraction": None, "extraction_status": "pending", "extraction_error": None,
+            "index_status": "pending", "index_token": uuid4().hex, "index_manifest": {},
+            "index_lease_until": None, "index_retry_after": None, "index_error": None,
+            "index_attempts": 0, "index_window": None, "updated_at": datetime.now(timezone.utc),
+        }}, return_document=ReturnDocument.AFTER)
+        if updated is not None:
+            return updated, True
+        latest = self.collection.find_one(scope)
+        if latest is not None and same_request(latest):
+            return latest, False
+        raise ReviewConflict
 
     def get(self, review_id, owner_id):
         return self.collection.find_one({"_id": review_id, "owner_id": owner_id})

@@ -19,6 +19,10 @@ class ReviewRequest(BaseModel):
         return value
 
 
+class ReviewEditRequest(ReviewRequest):
+    revision: int = Field(ge=1, strict=True)
+
+
 class ReviewEvent(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     status: Literal["executed", "planned", "unknown"]

@@ -56,6 +56,9 @@ function showRecord(record, today, day = null) {
         for (const source of record.result.strategies || []) {
             content.append(node('p', `引用：个人策略 · ${source.title} · document_id=${source.document_id} · chunk_id=${source.chunk_id}`));
         }
+        for (const source of record.result.knowledge || []) {
+            content.append(node('p', `引用：公共知识 · ${source.title} · document_id=${source.document_id || '旧公共库未记录'} · chunk_id=${source.chunk_id}`));
+        }
     }
 }
 

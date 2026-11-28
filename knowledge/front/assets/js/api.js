@@ -162,6 +162,15 @@ export function saveReview(text, requestId) {
     });
 }
 
+export function createRequestId() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export function fetchReviews() {
     return request('/reviews?limit=20');
 }
@@ -173,6 +182,21 @@ export function indexReview(reviewId) {
         timeoutMessage: '等待索引超时，复盘原文已保存。请刷新查看状态后再重试。',
     });
 }
+
+export function editReview(reviewId, text, revision, requestId) {
+    return request(`/reviews/${encodeURIComponent(reviewId)}`, {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text, revision, request_id: requestId}), timeout: 240000,
+        timeoutMessage: '等待纠错处理超时，文本可能已保存。请保留输入并重试，或查看已保存版本。',
+    });
+}
+
+export const fetchReview = (id) => request(`/reviews/${encodeURIComponent(id)}`);
+export const fetchInvestorSettings = () => request('/investor-settings');
+export const fetchStrategyCatalog = () => request('/investor-settings/documents');
+export const saveInvestorSettings = (settings) => request('/investor-settings', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings),
+});
 
 export function submitQuery({query, sessionId, isStream}) {
     const stream = Boolean(isStream);

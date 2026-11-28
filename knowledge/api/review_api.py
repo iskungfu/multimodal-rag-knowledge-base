@@ -9,7 +9,7 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 from knowledge.review.repository import ReviewConflict, ReviewRepository
-from knowledge.schema.review_schema import ReviewRequest
+from knowledge.schema.review_schema import ReviewEditRequest, ReviewRequest
 from knowledge.service.review_service import ReviewService
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
@@ -65,6 +65,19 @@ def index_review(review_id: UUID, service: ReviewService = Depends(get_review_se
         document = service.reindex(review_id)
     except PyMongoError:
         raise HTTPException(503, "复盘存储暂不可用") from None
+    if document is None:
+        raise HTTPException(404, "复盘不存在")
+    return document
+
+
+@router.put("/{review_id}")
+def edit_review(review_id: UUID, request: ReviewEditRequest, service: ReviewService = Depends(get_review_service)):
+    try:
+        document = service.edit(review_id, request.text, request.revision, request.request_id)
+    except ReviewConflict:
+        raise HTTPException(409, "复盘已被更新或请求编号已使用，请保留修改内容并刷新核对版本") from None
+    except PyMongoError:
+        raise HTTPException(503, "无法确认修改已保存，请保留输入并使用相同请求编号重试") from None
     if document is None:
         raise HTTPException(404, "复盘不存在")
     return document

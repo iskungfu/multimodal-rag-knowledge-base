@@ -84,7 +84,7 @@ class ReviewIndexer:
 
     def describe(self, document):
         state = index_state(document, self.now())
-        hidden = {"index_token", "index_manifest", "index_window", "index_lease_until"}
+        hidden = {"index_token", "index_manifest", "index_window", "index_lease_until", "edit_request_id"}
         result = {key: value for key, value in document.items() if key not in hidden}
         result.update(index_status=state.status, index_retry_after=state.retry_after, index_can_retry=state.can_retry)
         return result

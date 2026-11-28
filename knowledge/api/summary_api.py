@@ -29,6 +29,8 @@ class WatchRequest(BaseModel):
 
 
 async def summary_validation_error(request, exc):
+    if request.url.path.startswith("/investor-settings"):
+        return JSONResponse(status_code=422, content={"detail": "档案参数无效，请检查偏好、模式、文档编号和版本"})
     if request.url.path == "/reviews" or request.url.path.startswith("/reviews/"):
         return JSONResponse(status_code=422, content={"detail": "复盘参数无效，请检查文本长度、记录编号或查询数量"})
     if request.url.path.startswith(("/daily-summaries", "/watchlist")):
@@ -51,13 +53,17 @@ def _create_summary_service():
         from knowledge.summary.indices import IndexRepository, IndexService
         from knowledge.summary.repository import SummaryRepository, WatchlistRepository
         from knowledge.summary.strategies import PersonalStrategyRetriever
+        from knowledge.summary.knowledge import PublicKnowledgeRetriever
+        from knowledge.personalization.settings import SettingsRepository
         mongo = MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000,
                             connectTimeoutMS=5000, socketTimeoutMS=5000, tz_aware=True)
         db = mongo[os.getenv("MONGO_DB_NAME", "kb001")]
         service = SummaryService(SummaryRepository(db.daily_summaries), WatchlistRepository(db.watchlists),
                                  IndexService(IndexRepository(db.index_quotes)),
                                  MarketService(MarketQuoteRepository(db.market_quotes)),
-                                 PersonalStrategyRetriever(db.strategy_documents))
+                                 PersonalStrategyRetriever(db.strategy_documents),
+                                 knowledge=PublicKnowledgeRetriever(),
+                                 settings=SettingsRepository(db.investor_settings, db.strategy_documents).read)
         service.mongo_client = mongo
         return service
     except Exception:

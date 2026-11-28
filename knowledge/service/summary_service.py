@@ -9,6 +9,8 @@ from knowledge.service.risk_service import RiskService
 from knowledge.summary.indices import INDICES, N, evaluate_index, rule_note
 from knowledge.summary.repository import protect_result, SummaryInputError
 from knowledge.summary.strategies import StrategyChecklistModel
+from knowledge.investment.generation import EvidenceSelector, evidence_text, validate_selections
+from knowledge.personalization.settings import settings_context
 
 OWNER = "default_user"
 
@@ -34,7 +36,7 @@ class SummaryBusy(Exception):
 
 class SummaryService:
     def __init__(self, repository, watchlist, indices, market, strategies, *, resolver=None, model=None,
-                 now=None, owner=OWNER):
+                 now=None, owner=OWNER, knowledge=None, knowledge_model=None, settings=None):
         self.repository, self.watchlist, self.indices = repository, watchlist, indices
         self.market, self.strategies = market, strategies
         self.resolver = resolver or SymbolResolver()
@@ -42,6 +44,8 @@ class SummaryService:
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.owner = owner
         self.slot = threading.BoundedSemaphore(1)
+        self.knowledge, self.settings = knowledge, settings
+        self.knowledge_model = knowledge_model if knowledge_model is not None else EvidenceSelector(timeout=45, attempts=1)
 
     def add_watch(self, query):
         resolution = self.resolver.resolve(query)
@@ -93,6 +97,9 @@ class SummaryService:
                 if clock.monotonic() - started > 240:
                     raise TimeoutError
             warnings, assessments = [], []
+            error = "用户档案读取失败，未扩大个人策略范围；请稍后重试"
+            context = settings_context(self.settings()) if self.settings is not None else {}
+            error = "摘要生成失败，请稍后重试"
             start = day - timedelta(days=120)
             for symbol in INDICES:
                 check_budget()
@@ -114,11 +121,16 @@ class SummaryService:
             evidence = market_evidence(assessments, stocks)
             retrieval_query = "收盘复核：结合以下风险与缺失信息，检索相关的个人风险控制、仓位约束及交易纪律。\n"
             retrieval_query += "\n".join(item["text"].split("\n\n")[0] for item in evidence)
-            retrieved = self.strategies.retrieve(self.owner, retrieval_query)
+            if context:
+                retrieval_query += "\n用户档案资料：\n" + context["text"]
+            identifiers = context.get("document_ids")
+            options = {"document_ids": identifiers} if identifiers is not None else {}
+            retrieved = self.strategies.retrieve(self.owner, retrieval_query, **options)
             strategies = []
             if retrieved["status"] == "retrieved":
                 error = "策略模型调用或依据校验失败，未发布新摘要；请重试"
-                strategies = self.model.select(retrieved["items"], evidence)
+                selection_options = {"profile_context": context} if context else {}
+                strategies = self.model.select(retrieved["items"], evidence, **selection_options)
                 if not strategies:
                     raise ValueError
             elif retrieved["status"] == "empty":
@@ -126,8 +138,27 @@ class SummaryService:
             else:
                 warnings.append("已导入策略但未检索到足够片段，本摘要没有个性化操作提示")
             check_budget()
+            knowledge, knowledge_status = [], "unconfigured"
+            if self.knowledge is not None:
+                try:
+                    public = self.knowledge.retrieve(retrieval_query + "\n公共投资知识中的风险控制、分散投资和决策依据。")
+                    knowledge_status = public["status"]
+                    if knowledge_status == "retrieved":
+                        if any(item.get("source") != "knowledge" or item.get("owner_id") != "public"
+                               for item in public["items"]):
+                            raise ValueError("公共知识归属不符")
+                        selected = self.knowledge_model.select(retrieval_query, public["items"], evidence)
+                        knowledge = validate_selections(selected, public["items"], evidence)
+                except Exception:
+                    knowledge_status = "failed"
+            if not knowledge:
+                warnings.append("公共知识检索或整理暂不可用，本次未引用公共知识。" if knowledge_status == "failed"
+                                else "暂无可引用的公共知识，可导入投资书籍后重新生成。")
+            check_budget()
             lines = [f"每日投资摘要｜实际收盘日期：{day.isoformat()}",
                      "使用生成时的关注列表与个人策略；历史补生成不还原历史当日配置。", "大盘当前位置风险"]
+            if context:
+                lines.insert(2, evidence_text(context["text"]))
             for item in assessments:
                 latest = item["latest"]
                 level = f'{item["level"]}风险' if item["level"] else "无法评级"
@@ -149,10 +180,19 @@ class SummaryService:
                              f'\n来源：个人策略《{item["title"]}》，'
                              f'[chunk_id={item["chunk_id"]}]')
             if not strategies:
-                lines.append("没有可引用的个人策略；请导入策略文档后重新生成。")
+                lines.append("当前模式没有可引用的个人策略；请核对模式中的文档或导入策略后重新生成。")
+            if knowledge:
+                lines.append("公共知识参考：用于核对判断依据，书籍观点不证明当前策略适用或收益。")
+                for item in knowledge:
+                    lines.append("公共知识原文（完整检索片段）：\n" + evidence_text(item["content"]) +
+                                 f'\n来源：公共知识《{evidence_text(item["title"])}》，'
+                                 f'document_id={item.get("document_id") or "旧公共库未记录"}；'
+                                 f'[chunk_id={item["chunk_id"]}]')
             lines += ["数据与限制："] + list(dict.fromkeys(warnings))
             result = protect_result({"date": day.isoformat(), "indices": assessments, "stocks": stocks,
                                      "strategies": strategies, "strategy_status": retrieved["status"],
+                                     "knowledge": knowledge, "knowledge_status": knowledge_status,
+                                     "personalization": context,
                                      "warnings": list(dict.fromkeys(warnings)), "answer": "\n\n".join(lines)})
             error = "摘要保存失败，请稍后重试"
             self.repository.finish(claim, self.now(), result=result)

@@ -22,6 +22,7 @@ from starlette.staticfiles import StaticFiles
 
 from knowledge.api.market_api import router as market_router
 from knowledge.api.review_api import router as review_router
+from knowledge.api.settings_api import router as settings_router
 from knowledge.api.summary_api import router as summary_router, summary_validation_error
 from knowledge.summary.scheduler import summary_lifespan
 from knowledge.core.deps import get_query_service
@@ -173,6 +174,7 @@ def create_app(*, summary_enabled=None) -> FastAPI:
     app.include_router(market_router)
     app.include_router(review_router)
     app.include_router(summary_router)
+    app.include_router(settings_router)
     app.add_exception_handler(RequestValidationError, summary_validation_error)
     return app
 

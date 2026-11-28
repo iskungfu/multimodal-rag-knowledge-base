@@ -48,8 +48,11 @@ class StrategyVectors:
             f'and document_id == {json.dumps(document_id)}'
         ), timeout=30)
 
-    def search(self, dense_vector, sparse_vector, owner_id, limit=5):
-        requests = create_hybrid_search_requests(dense_vector, sparse_vector, limit=limit)
+    def search(self, dense_vector, sparse_vector, owner_id, limit=5, *, document_ids=None):
+        if document_ids == []:
+            return [[]]
+        expression = "document_id in " + json.dumps(document_ids) if document_ids is not None else None
+        requests = create_hybrid_search_requests(dense_vector, sparse_vector, limit=limit, expr=expression)
         result = execute_hybrid_search_query(
             self.client, self.collection, requests, limit=limit,
             output_fields=["content", "title", "file_title", "owner_id", "doc_type", "document_id"],

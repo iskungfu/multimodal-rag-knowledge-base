@@ -18,7 +18,7 @@ class SummaryInputError(ValueError):
 def protect_result(result):
     if not result:
         return result
-    citations = [str(item["chunk_id"]) for item in result.get("strategies", [])]
+    citations = [str(item["chunk_id"]) for item in result.get("strategies", []) + result.get("knowledge", [])]
     answer = finalize_answer(result.get("answer", ""), citations)
     result = redact_value({key: value for key, value in result.items() if key != "answer"})
     return {**result, "answer": answer}

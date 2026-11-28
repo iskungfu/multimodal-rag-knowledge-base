@@ -22,6 +22,7 @@ class ReviewService:
         result["original_text"] = redact_text(result["original_text"])
         result["extraction"] = redact_value(result["extraction"])
         result["id"] = result.pop("_id")
+        result["revision"] = document.get("revision", 1)
         result["disclaimer"] = DISCLAIMER
         return result
 
@@ -29,20 +30,35 @@ class ReviewService:
         safe_text = redact_text(text)
         document, created = self.repository.create(str(request_id), DEFAULT_OWNER, safe_text)
         if created:
-            extraction, error = None, None
-            try:
-                extraction = redact_value(self.extractor.extract(safe_text))
-            except ExtractionUnavailable:
-                error = "model_unavailable"
-            except Exception:
-                error = "invalid_extraction"
-            try:
-                document.update(self.repository.finish(document["_id"], DEFAULT_OWNER, extraction, error))
-            except PyMongoError:
-                result = self.present(document)
-                result["warning"] = "复盘文本已保存，抽取结果未能写入，请稍后查看原文。"
-                return result
-        if created and self.index_enabled:
+            return self.extract_saved(document)
+        return self.present(document)
+
+    def edit(self, review_id, text, revision, request_id):
+        document, changed = self.repository.edit(str(review_id), DEFAULT_OWNER, redact_text(text),
+                                                 revision, str(request_id))
+        if document is None:
+            return None
+        return self.extract_saved(document) if changed else self.present(document)
+
+    def extract_saved(self, document):
+        extraction, error = None, None
+        try:
+            extraction = redact_value(self.extractor.extract(document["original_text"]))
+        except ExtractionUnavailable:
+            error = "model_unavailable"
+        except Exception:
+            error = "invalid_extraction"
+        try:
+            changes = self.repository.finish(document["_id"], DEFAULT_OWNER, extraction, error,
+                                             revision=document.get("revision", 1))
+            if changes is None:
+                return self.get(document["_id"])
+            document.update(changes)
+        except PyMongoError:
+            result = self.present(document)
+            result["warning"] = "复盘文本已保存，抽取结果未能写入，请稍后查看原文。"
+            return result
+        if self.index_enabled:
             return self.reindex(document["_id"])
         return self.present(document)
 
