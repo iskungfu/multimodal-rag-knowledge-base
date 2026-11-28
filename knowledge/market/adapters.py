@@ -110,8 +110,12 @@ class EastmoneyAdapter:
             data = raw["data"]
             if raw.get("rc") != 0 or data["code"] != code:
                 raise ValueError("代码或状态不匹配")
+            if not isinstance(data["klines"], list):
+                raise ValueError("日线列表无效")
             quotes = []
             for row in data["klines"]:
+                if not isinstance(row, str):
+                    raise ValueError("日线记录无效")
                 fields = row.split(",")
                 day = date.fromisoformat(fields[0])
                 if not start <= day <= end:

@@ -53,3 +53,16 @@ class DailyQuote(BaseModel):
     source_time: datetime | None = None
     updated_at: datetime
     raw: dict
+
+
+def validate_quote_batch(quotes, code, start, end):
+    unique = {}
+    for quote in quotes:
+        if quote.code != code or not start <= quote.date <= end:
+            raise MarketUnavailable("行情标的或日期不匹配")
+        previous = unique.get(quote.date)
+        ignored = {"raw", "updated_at", "source_time"}
+        if previous is not None and previous.model_dump(exclude=ignored) != quote.model_dump(exclude=ignored):
+            raise MarketUnavailable("同一交易日存在冲突行情")
+        unique[quote.date] = quote
+    return list(unique.values())

@@ -17,7 +17,7 @@ from knowledge.review.indexing import ReviewIndexer, digest, index_texts
 from knowledge.review.privacy import redact_text, redact_value
 from knowledge.review.repository import ReviewRepository
 from knowledge.review.vectors import ReviewVectors
-from knowledge.service.review_service import DEFAULT_OWNER, ReviewService, present
+from knowledge.service.review_service import DEFAULT_OWNER, ReviewService
 
 
 TEXT = "如果明天回踩支撑才考虑买入 000001。\n今天没有成交，也不能据此推断持仓。"
@@ -412,11 +412,11 @@ def test_public_status_handles_expired_lease_and_missing_legacy_fields(setup_ind
     identifier = create_review(components)
     document = components.repository.get(identifier, DEFAULT_OWNER)
     document.update(index_status="processing", index_lease_until=datetime.now(timezone.utc) - timedelta(seconds=1))
-    assert present(document)["index_status"] == "interrupted"
-    assert present(document)["index_can_retry"] is True
+    assert components.indexer.describe(document)["index_status"] == "interrupted"
+    assert components.indexer.describe(document)["index_can_retry"] is True
     legacy = {name: value for name, value in document.items() if not name.startswith("index_")}
-    assert present(legacy)["index_status"] == "pending"
-    assert present(legacy)["index_can_retry"] is True
+    assert components.indexer.describe(legacy)["index_status"] == "pending"
+    assert components.indexer.describe(legacy)["index_can_retry"] is True
 
 
 def test_recursive_redaction_preserves_only_fixed_index_identifiers():

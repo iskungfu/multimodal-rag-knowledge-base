@@ -1,11 +1,12 @@
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import mongomock
 import pytest
 from pymilvus import DataType
 
 from knowledge.investment.retrieval import InvestmentRetriever
-from knowledge.review.indexing import digest
+from knowledge.review.indexing import ReviewIndexer
 
 
 @pytest.fixture
@@ -21,7 +22,7 @@ def setup_retriever(monkeypatch):
         calls.append(kwargs)
         return [hits]
     monkeypatch.setattr(milvus_util, "execute_hybrid_search_query", search)
-    retriever = InvestmentRetriever(db.documents, db.reviews, client,
+    retriever = InvestmentRetriever(db.documents, Mock(spec=ReviewIndexer), client,
         embed=lambda texts: {"dense": [[1, 0]], "sparse": [{1: 1}]},
         collections={"personal": "personal", "knowledge": "knowledge", "review": "review"})
     return retriever, db, hits, calls
@@ -30,11 +31,10 @@ def setup_retriever(monkeypatch):
 def hit(kind, owner=None):
     content = "若条件成立才执行，当前不确认触发。"
     return {"id": "123", "entity": {"content": content, "title": "自建测试", "document_id": "doc",
-        "owner_id": owner or ("public" if kind == "knowledge" else "default_user"), "doc_type": kind,
-        "review_id": "doc", "index_version": "version", "content_hash": digest(content)}}
+        "owner_id": owner or ("public" if kind == "knowledge" else "default_user"), "doc_type": kind}}
 
 
-@pytest.mark.parametrize("kind", ["personal", "knowledge", "review"])
+@pytest.mark.parametrize("kind", ["personal", "knowledge"])
 def test_owner_boundary_is_checked_after_query(setup_retriever, kind):
     retriever, database, hits, calls = setup_retriever
     hits.append(hit(kind, "other_owner"))
@@ -54,26 +54,21 @@ def test_personal_must_match_completed_document(setup_retriever):
     assert retriever.search("personal", [1, 0], {1: 1})[0]["document_id"] == "doc"
 
 
-@pytest.mark.parametrize("corruption", ["status", "version", "id", "hash", "content", "owner"])
-def test_review_requires_published_manifest(setup_retriever, corruption):
+def test_review_route_uses_index_interface_without_reading_publication_fields(setup_retriever):
     retriever, database, hits, calls = setup_retriever
-    row = hit("review")
-    hits.append(row)
-    record = {"_id": "doc", "owner_id": "default_user", "doc_type": "review", "index_status": "completed",
-              "original_text": "计划买入，但未成交。",
-              "index_version": "version", "index_manifest": {"123": digest(row["entity"]["content"])}}
-    database.reviews.insert_one(record)
-    assert retriever.search("review", [1, 0], {1: 1})
-    if corruption in {"status", "version", "owner"}:
-        key, value = {"status": ("index_status", "processing"), "version": ("index_version", "new"), "owner": ("owner_id", "other")}[corruption]
-        database.reviews.update_one({"_id": "doc"}, {"$set": {key: value}})
-    elif corruption == "id":
-        row["id"] = "456"
-    elif corruption == "hash":
-        row["entity"]["content_hash"] = "invalid"
-    else:
-        row["entity"]["content"] = "篡改内容"
-    assert not retriever.search("review", [1, 0], {1: 1})
+    evidence = {"source": "review", "content": "复盘完整原文：计划买入但未成交。", "review_id": "review"}
+    retriever.review_index.search.return_value = [evidence]
+    assert retriever.search("review", [1, 0], {1: 1}) == [evidence]
+    retriever.review_index.search.assert_called_once_with([1, 0], {1: 1}, "default_user")
+    assert not calls and not database.list_collection_names()
+
+
+def test_review_failure_preserves_other_routes(setup_retriever):
+    retriever, database, hits, calls = setup_retriever
+    retriever.review_index.search.side_effect = RuntimeError("private storage failure")
+    routes = retriever.retrieve("我的复盘")
+    assert routes["review"] == {"status": "failed", "items": []}
+    assert all(routes[kind] == {"status": "empty", "items": []} for kind in ("personal", "knowledge"))
 
 
 def test_legacy_private_collection_never_falls_back(setup_retriever):

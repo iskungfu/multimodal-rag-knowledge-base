@@ -1,10 +1,12 @@
 """先落盘文本，再更新抽取结果。所有读写均限定 owner_id。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from pymongo import DESCENDING, ReadPreference, ReturnDocument
 from pymongo.errors import DuplicateKeyError
+
+from knowledge.review.publication import COOLDOWN, LEASE, index_state
 
 
 class ReviewConflict(Exception):
@@ -52,29 +54,29 @@ class ReviewRepository:
             [("created_at", DESCENDING), ("_id", DESCENDING)]
         ).limit(limit))
 
+    def published(self, review_id, owner_id, version):
+        if not version:
+            return None
+        return self.collection.find_one({
+            "_id": review_id, "owner_id": owner_id, "doc_type": "review",
+            "index_status": "completed", "index_version": version,
+        }, {"index_manifest": 1, "original_text": 1})
+
     def claim_index(self, review_id, owner_id, now):
         """单记录 CAS；每10分钟至多3次、失败间隔30秒、租约180秒。旧记录按ID补索引。"""
         scope = {"_id": review_id, "owner_id": owner_id, "doc_type": "review"}
         old = self.collection.find_one(scope)
-        if not old or old.get("index_status") == "completed":
+        if not old:
             return None
-        deadline = old.get("index_lease_until")
-        if deadline and deadline.replace(tzinfo=timezone.utc) > now:
-            return None
-        retry = old.get("index_retry_after")
-        if retry and retry.replace(tzinfo=timezone.utc) > now:
-            return None
-        window = old.get("index_window")
-        reset = not window or window.replace(tzinfo=timezone.utc) <= now - timedelta(minutes=10)
-        attempts = 0 if reset else old.get("index_attempts", 0)
-        if attempts >= 3:
+        state = index_state(old, now)
+        if not state.can_retry:
             return None
         scope["index_token"] = old.get("index_token")
         scope["index_status"] = old.get("index_status")
         claim = self.collection.find_one_and_update(scope, {"$set": {
             "index_status": "processing", "index_token": uuid4().hex,
-            "index_lease_until": now + timedelta(seconds=180),
-            "index_window": now if reset else window, "index_attempts": attempts + 1,
+            "index_lease_until": now + LEASE,
+            "index_window": state.window, "index_attempts": state.attempts + 1,
             "index_error": None, "updated_at": now,
         }}, return_document=ReturnDocument.AFTER)
         if claim:
@@ -98,7 +100,7 @@ class ReviewRepository:
         changes = {"index_status": "completed" if success else "failed",
                    "index_error": None if success else "index_unavailable",
                    "index_lease_until": None, "updated_at": now,
-                   "index_retry_after": None if success else now + timedelta(seconds=30)}
+                   "index_retry_after": None if success else now + COOLDOWN}
         if success:
             changes.update(index_version=claim["index_token"], index_manifest=manifest)
         return self.collection.update_one({

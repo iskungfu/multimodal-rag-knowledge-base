@@ -34,6 +34,7 @@ FOREIGN_MARKER = "紫鹭8642"
 FAILURE_MARKER = "acceptance-injected-private-error"
 SAMPLES = {
     "personal": (
+        "# 仅在熊市时适用\n## 仓位操作\n"
         "若股价连续上涨且没有完成回踩确认，先执行青鹭7391核对法：回看17个交易日，"
         "再核对自己写下的仓位上限。熊市轻仓只适用于已经人工核实市场条件的情况，"
         "当前阶段不能由此推断。"
@@ -48,7 +49,7 @@ SAMPLES = {
     ),
 }
 FACTS = {
-    "personal": ("青鹭7391", "17个交易日", "回踩", "仓位上限"),
+    "personal": ("青鹭7391", "17个交易日", "回踩", "仓位上限", "仅在熊市时适用", "仓位操作"),
     "knowledge": ("松柏6284", "现金流", "债务", "盈利质量"),
     "review": ("白鹭9527", "计划", "尚未提交订单", "没有成交"),
 }
@@ -401,7 +402,7 @@ class Acceptance:
 
     def retriever(self, **overrides):
         from knowledge.investment.retrieval import InvestmentRetriever
-        return InvestmentRetriever(documents=self.documents, reviews=self.reviews,
+        return InvestmentRetriever(documents=self.documents, review_index=self.indexer,
                                    client=self.milvus, collections=self.collections, **overrides)
 
     def assert_routes(self, name, routes):
@@ -730,7 +731,10 @@ class Acceptance:
         empty_collections = {kind: self.prefix + "_empty_" + kind for kind in KINDS}
         self.milvus.allowed.update(empty_collections.values())
         from knowledge.investment.retrieval import InvestmentRetriever
-        empty = InvestmentRetriever(self.documents, self.reviews, self.milvus, collections=empty_collections)
+        from knowledge.review.indexing import ReviewIndexer
+        from knowledge.review.vectors import ReviewVectors
+        empty_index = ReviewIndexer(self.review_repo, ReviewVectors(self.milvus, empty_collections["review"]))
+        empty = InvestmentRetriever(self.documents, empty_index, self.milvus, collections=empty_collections)
         result = InvestmentAssistant(empty).answer(COMBINED_QUERY)
         self.check("all_routes_empty_distinct", all(route["status"] == "empty" for route in result["routes"].values())
                    and result["selection_status"] == "empty" and "暂无可用资料" in result["answer"])

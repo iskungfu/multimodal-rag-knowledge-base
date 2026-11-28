@@ -1,7 +1,7 @@
 """每路独立失败；Milvus范围过滤后再次核验来源和Mongo可见状态。"""
 import os
 
-from knowledge.review.indexing import digest, embed_texts
+from knowledge.review.indexing import ReviewIndexer, embed_texts
 from knowledge.review.privacy import redact_value
 
 OWNER = "default_user"
@@ -28,8 +28,8 @@ def fuse(routes, rank_constant=60, limit=18):
 
 
 class InvestmentRetriever:
-    def __init__(self, documents=None, reviews=None, client=None, embed=None, collections=None):
-        self.documents, self.reviews, self.client = documents, reviews, client
+    def __init__(self, documents=None, review_index=None, client=None, embed=None, collections=None):
+        self.documents, self.review_index, self.client = documents, review_index, client
         self.embed = embed or embed_texts
         self.collections = collections or {
             "personal": os.getenv("STRATEGY_COLLECTION", "strategy_chunks_v1"),
@@ -53,6 +53,10 @@ class InvestmentRetriever:
         return routes
 
     def search(self, kind, dense, sparse):
+        if kind == "review":
+            if self.review_index is None:
+                self.review_index = ReviewIndexer(collection=self.collections["review"])
+            return self.review_index.search(dense, sparse, OWNER)
         from knowledge.utils.clients.storage_clients import StorageClients
         from knowledge.utils.milvus_util import create_hybrid_search_requests, execute_hybrid_search_query
         from knowledge.strategy.scope import scoped_fields, legacy_public_collection
@@ -68,16 +72,14 @@ class InvestmentRetriever:
         if not scoped and not legacy:
             raise ValueError("检索库未建立隔离")
         repository = None
-        if kind != "knowledge":
-            repository = self.documents if kind == "personal" else self.reviews
+        if kind == "personal":
+            repository = self.documents
             if repository is None:
                 db = StorageClients.get_mongo_client()[os.getenv("MONGO_DB_NAME", "kb001")]
-                repository = db.strategy_documents if kind == "personal" else db.trade_reviews
+                repository = db.strategy_documents
         fields = ["title", "content"]
         if scoped:
             fields += ["owner_id", "doc_type", "document_id"]
-        if kind == "review":
-            fields += ["review_id", "index_version", "content_hash"]
         hits = execute_hybrid_search_query(client, collection,
             create_hybrid_search_requests(dense, sparse, limit=16), limit=16,
             owner_id=OWNER if kind != "knowledge" else "public", doc_type=kind, output_fields=fields)
@@ -94,23 +96,10 @@ class InvestmentRetriever:
                 if not identifier or not repository.find_one({"_id": identifier, "owner_id": OWNER,
                         "doc_type": "personal", "status": "completed"}, {"_id": 1}):
                     continue
-            if kind == "review":
-                if not identifier or entity.get("review_id") != identifier:
-                    continue
-                record = repository.find_one({"_id": identifier, "owner_id": OWNER, "doc_type": "review",
-                    "index_status": "completed", "index_version": entity.get("index_version")}, {"index_manifest": 1, "original_text": 1})
-                if not record or record.get("index_manifest", {}).get(str(hit["id"])) != digest(content) or entity.get("content_hash") != digest(content):
-                    continue
-                original = record.get("original_text")
-                if not isinstance(original, str) or not original.strip() or len(original) > 10000:
-                    continue
-                content = "复盘完整原文（计划、挂单和未知不代表成交，请核对所有前提）：\n" + original
             item = redact_value({"source": kind, "collection": collection, "document_id": identifier,
-                "review_id": identifier if kind == "review" else "", "chunk_id": str(hit["id"]),
+                "review_id": "", "chunk_id": str(hit["id"]),
                 "owner_id": "public" if kind == "knowledge" else OWNER,
                 "title": entity.get("title") or kind, "content": content})
-            if kind == "review":
-                item["vector_excerpt"] = redact_value(entity["content"])
             if source_key(item) not in seen:
                 items.append(item)
                 seen.add(source_key(item))

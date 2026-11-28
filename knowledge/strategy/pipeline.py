@@ -8,10 +8,10 @@ from knowledge.processor.import_processor.base import BaseNode
 from knowledge.processor.import_processor.config import ImportConfig
 from knowledge.processor.import_processor.nodes.entry_node import EntryNode
 from knowledge.processor.import_processor.nodes.pdf_to_md_node import PdfToMdNode
-from knowledge.processor.import_processor.nodes.document_split_node import DocumentSplitNode
 from knowledge.processor.import_processor.nodes.bge_embedding_chunks_node import BgeEmbeddingChunksNode
 from knowledge.processor.import_processor.state import ImportGraphState
 from knowledge.strategy.privacy import sanitize_markdown
+from knowledge.strategy.splitting import StrategySplitNode
 from knowledge.review.privacy import redact_text
 
 
@@ -57,7 +57,7 @@ def build_strategy_graph(vectors, config=None):
         "entry_node": EntryNode(config),
         "pdf_to_md_node": PdfToMdNode(config),
         "strategy_privacy_node": StrategyPrivacyNode(config),
-        "document_split_node": DocumentSplitNode(config),
+        "document_split_node": StrategySplitNode(config),
         "bge_embedding_chunks_node": BgeEmbeddingChunksNode(config),
         "milvus_import_node": StrategyInsertNode(vectors, config),
     }.items():

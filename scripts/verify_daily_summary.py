@@ -78,7 +78,7 @@ def main():
         vector_created = True
         vectors.prepare()
         doc_repo = StrategyRepository(documents)
-        content = ('# 自建摘要验收策略\n\n若单只股票风险偏高，先检查自己设定的仓位上限，避免连续追高。'
+        content = ('# 仅在熊市时适用\n## 自建摘要验收策略\n\n若单只股票风险偏高，先检查自己设定的仓位上限，避免连续追高。'
                    '若处于熊市才轻仓；当前市场阶段未知时不能认为此前提已满足。'
                    '仅在人工核实策略前提后决定是否采用。验收短语：青鹭7391。')
         if args.host:
@@ -169,7 +169,8 @@ def main():
             check('summary_completed', record['status'] == 'completed')
             answer = record['result']['answer']
             check('real_strategy_in_summary', bool(record['result']['strategies']) and '青鹭7391' in answer and '紫鹭8642' not in answer)
-            check('citation_and_conditions', '[chunk_id=' in answer and '前提尚未确认满足' in answer and '若处于熊市才轻仓' in answer)
+            check('citation_and_conditions', '[chunk_id=' in answer and '前提尚未确认满足' in answer
+                  and '若处于熊市才轻仓' in answer and '仅在熊市时适用' in answer)
             check('strategy_market_evidence', all(item.get('evidence') for item in record['result']['strategies'])
                   and '本条策略的行情复核依据' in answer)
             check('risk_and_disclaimer', '个股风险：' in answer and 'sh000001' in answer and 'sz399001' in answer

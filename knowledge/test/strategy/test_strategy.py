@@ -113,6 +113,70 @@ def test_private_temp_names_and_cleanup_on_success(setup_service):
     assert env.service.get(state["task_id"])["status"] == "completed"
 
 
+@pytest.mark.parametrize("body", ["降低仓位至两成。", "降低仓位至两成。" * 100])
+def test_strategy_import_keeps_all_heading_conditions_with_each_action(setup_service, body):
+    env = setup_service
+    content = "# 仅在熊市时适用\n## 已确认跌破支撑\n### 仓位操作\n" + body
+    response = env.client.post("/strategies/text", json={"title": "条件策略", "text": content})
+    assert env.client.get("/strategies/" + response.json()["task_id"]).json()["status"] == "completed"
+    actions = [chunk["text"] for chunk in env.captured if "降低仓位" in chunk["text"]]
+    assert actions
+    assert all("仅在熊市时适用" in text and "已确认跌破支撑" in text for text in actions)
+    assert all(len(chunk["text"]) <= 400 for chunk in env.captured)
+
+
+def test_strategy_sibling_conditions_do_not_leak_into_each_other(setup_service):
+    env = setup_service
+    content = "# 熊市时\n## 操作\n保持轻仓。\n# 牛市时\n## 操作\n分批加仓。"
+    response = env.client.post("/strategies/text", json={"title": "两种前提", "text": content})
+    assert env.client.get("/strategies/" + response.json()["task_id"]).json()["status"] == "completed"
+    for chunk in env.captured:
+        if "保持轻仓" in chunk["text"]:
+            assert "熊市时" in chunk["text"] and "牛市时" not in chunk["text"]
+        if "分批加仓" in chunk["text"]:
+            assert "牛市时" in chunk["text"] and "熊市时" not in chunk["text"]
+
+
+def test_heading_only_strategy_still_imports(setup_service):
+    env = setup_service
+    response = env.client.post("/strategies/text", json={"title": "一条心得", "text": "# 若处于熊市才轻仓"})
+    assert env.client.get("/strategies/" + response.json()["task_id"]).json()["status"] == "completed"
+    assert any("若处于熊市才轻仓" in chunk["text"] for chunk in env.captured)
+
+
+@pytest.mark.parametrize("length,status", [(396, "completed"), (397, "failed")])
+def test_heading_only_strategy_respects_exact_budget(setup_service, length, status):
+    env = setup_service
+    heading = "# " + "长" * length
+    response = env.client.post("/strategies/text", json={"title": "标题预算", "text": heading})
+    assert env.client.get("/strategies/" + response.json()["task_id"]).json()["status"] == status
+    if status == "completed":
+        assert env.captured[0]["text"] == heading + "\n\n"
+        assert len(env.captured[0]["text"]) == 400
+    else:
+        env.vectors.insert.assert_not_called()
+
+
+@pytest.mark.parametrize("repetitions", [1, 1000])
+def test_small_parent_introduction_stays_with_child_action(setup_service, repetitions):
+    env = setup_service
+    content = "# 条件\n只有完成复盘才执行。\n## 操作\n" + "降低仓位。" * repetitions
+    response = env.client.post("/strategies/text", json={"title": "前提与行动", "text": content})
+    assert env.client.get("/strategies/" + response.json()["task_id"]).json()["status"] == "completed"
+    actions = [chunk["text"] for chunk in env.captured if "降低仓位" in chunk["text"]]
+    assert actions and all("只有完成复盘才执行" in text for text in actions)
+
+
+def test_long_strategy_heading_is_not_truncated_when_body_splits(setup_service):
+    env = setup_service
+    condition = "# " + "先核对前提，" * 20 + "仅熊市适用"
+    content = condition + "\n## 执行\n" + "降低仓位至两成。" * 100
+    response = env.client.post("/strategies/text", json={"title": "长标题条件", "text": content})
+    assert env.client.get("/strategies/" + response.json()["task_id"]).json()["status"] == "completed"
+    actions = [chunk["text"] for chunk in env.captured if "降低仓位" in chunk["text"]]
+    assert len(actions) > 1 and all(condition in text and len(text) <= 400 for text in actions)
+
+
 @pytest.mark.parametrize("failure", ["schema", "pdf", "embedding", "insert"])
 def test_failure_is_persistent_private_and_cleans_temp(setup_service, monkeypatch, failure):
     env = setup_service

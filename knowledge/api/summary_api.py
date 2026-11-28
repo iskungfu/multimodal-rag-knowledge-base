@@ -29,6 +29,8 @@ class WatchRequest(BaseModel):
 
 
 async def summary_validation_error(request, exc):
+    if request.url.path == "/reviews" or request.url.path.startswith("/reviews/"):
+        return JSONResponse(status_code=422, content={"detail": "复盘参数无效，请检查文本长度、记录编号或查询数量"})
     if request.url.path.startswith(("/daily-summaries", "/watchlist")):
         return JSONResponse(status_code=422, content={"detail": "参数无效，请检查日期或股票完整名称/代码"})
     return await request_validation_exception_handler(request, exc)

@@ -34,7 +34,8 @@ def route_query(query, resolver, history):
         return {"resolution": resolution, "query": effective, "investment": True, "market": bool(context.get("market"))}
     market = bool(MARKET.search(query))
     if market and not re.search(r"ETF|基金", query):
-        if re.search(r"(?:上证指数|深证成指|指数)\s*(?:代码\s*)?[（(]?\s*[0-9]{6}(?![0-9])", query):
+        bare_codes = [match for match in SECURITY_IDENTIFIER.finditer(query) if not match[1] and not match[3]]
+        if bare_codes and re.search(r"上证指数|深证成指|指数", query):
             return {"resolution": Resolution(message="指数名称与六位证券代码需要确认，请分别明确指数和个股。上证指数使用sh000001，深证成指使用sz399001；个股000001是平安银行。"),
                     "query": query, "investment": False, "market": False}
         remainder = MARKET_WORDS.sub("", query)

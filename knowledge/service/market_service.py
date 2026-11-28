@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 
 from knowledge.market.adapters import EastmoneyAdapter, TencentAdapter
-from knowledge.market.models import MarketUnavailable, date_window, market_symbol
+from knowledge.market.models import MarketUnavailable, date_window, market_symbol, validate_quote_batch
 
 
 class MarketService:
@@ -29,6 +29,7 @@ class MarketService:
             for adapter in self.adapters:
                 try:
                     quotes = adapter.fetch_daily(code, start, end, now)
+                    quotes = validate_quote_batch(quotes, code, start, end)
                 except MarketUnavailable:
                     continue
                 if not quotes:

@@ -163,6 +163,43 @@ def test_fallback_exposes_partial_range_and_source():
     assert any("历史区间可能不完整" in warning for warning in result["warnings"])
 
 
+@pytest.mark.parametrize("row", [None, 123, {}, []])
+def test_malformed_daily_row_uses_fallback_without_writing_primary(row):
+    raw = json.loads((FIXTURES / "eastmoney_daily.json").read_text(encoding="utf-8"))
+    raw["data"]["klines"].append(row)
+    repository = MemoryRepository()
+    result = MarketService(repository, [eastmoney(daily=raw), tencent()], now=lambda: NOW).refresh("600519", START, END)
+    assert result["source"] == "tencent"
+    assert repository.writes == 1
+    assert all(quote["source"] == "tencent" for quote in result["quotes"])
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_conflicting_same_day_quotes_are_rejected_before_storage(reverse):
+    quotes = eastmoney().fetch_daily("600519", START, END, NOW)
+    quotes.append(quotes[-1].model_copy(update={"close": quotes[-1].close + 1}))
+    adapter = Mock()
+    adapter.name = "eastmoney"
+    adapter.fetch_daily.return_value = list(reversed(quotes)) if reverse else quotes
+    repository = MemoryRepository()
+    service = MarketService(repository, [adapter], now=lambda: NOW)
+    with pytest.raises(MarketUnavailable):
+        service.refresh("600519", START, END)
+    assert repository.writes == 0 and repository.rows == {}
+    assert service.cache == {}
+
+
+def test_identical_daily_duplicates_remain_idempotent():
+    quotes = eastmoney().fetch_daily("600519", START, END, NOW)
+    adapter = Mock()
+    adapter.name = "eastmoney"
+    adapter.fetch_daily.return_value = quotes + [quotes[-1].model_copy(deep=True)]
+    repository = MemoryRepository()
+    result = MarketService(repository, [adapter], now=lambda: NOW).refresh("600519", START, END)
+    assert len(result["quotes"]) == len(quotes)
+    assert repository.writes == 1
+
+
 def test_old_source_date_is_not_relabelled_as_today():
     next_day = NOW + timedelta(days=1)
     result = MarketService(MemoryRepository(), [tencent()], now=lambda: next_day).refresh("600519")

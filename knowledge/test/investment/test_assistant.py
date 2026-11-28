@@ -230,12 +230,32 @@ def test_stock_noun_followup_uses_context_without_swallowing_new_name():
     assert "贵州茅台" in resolver.resolve.call_args.args[0]
 
 
-@pytest.mark.parametrize("query", ["上证指数600519风险大吗？", "上证指数（000001）", "上证指数代码000001"])
+@pytest.mark.parametrize("query", [
+    "上证指数600519风险大吗？", "上证指数（000001）", "上证指数代码000001",
+    "上证指数代码是000001，风险高吗？", "上证指数的代码为000001，风险如何？",
+    "上证指数，代码：000001", "000001是上证指数，风险如何？",
+    "上证指数的交易代码也叫000001，风险如何？", "深证成指的编号写成399001对吗？",
+])
 def test_index_name_with_stock_code_requires_clarification(query):
     resolver = Mock()
     result = route_query(query, resolver, [])
     assert result["resolution"].message and not result["resolution"].security
     resolver.resolve.assert_not_called()
+
+
+def test_ambiguous_index_query_cannot_pollute_followup_security():
+    from knowledge.risk.symbols import SymbolResolver
+    resolver = SymbolResolver()
+    resolver.lookup = lambda term: [Security("000001", "平安银行")] if term == "000001" else []
+    risk = Mock()
+    service = QueryService(resolver, risk, investment=assistant())
+    app = create_app(summary_enabled=False)
+    app.dependency_overrides[get_query_service] = lambda: service
+    with TestClient(app) as client:
+        for question in ("上证指数代码是000001，风险高吗？", "那它风险如何？"):
+            response = client.post("/query", json={"query": question, "session_id": "ambiguous-index"})
+            assert response.status_code == 200
+    risk.answer.assert_not_called()
 
 
 def test_named_trade_with_stop_loss_keeps_stock_resolution():

@@ -70,6 +70,8 @@ class ReviewVectors:
                            f' and index_version == {json.dumps(version)}', timeout=15)
 
     def search(self, dense, sparse, owner, limit=8):
+        if not self.client.has_collection(self.collection, timeout=10):
+            return []
         self.validate()
         return execute_hybrid_search_query(self.client, self.collection,
             create_hybrid_search_requests(dense, sparse, limit=limit), limit=limit, owner_id=owner, doc_type="review",

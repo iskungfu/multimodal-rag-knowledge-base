@@ -187,3 +187,25 @@ def test_redaction_before_model_storage_and_read(components):
         assert collection.find_one()["original_text"] == safe
         collection.update_one({"_id": body["id"], "owner_id": DEFAULT_OWNER}, {"$set": {"original_text": source}})
         assert client.get(f'/reviews/{body["id"]}').json()["original_text"] == safe
+
+
+@pytest.mark.parametrize("invalid_request", [
+    ("post", "/reviews", {"text": "13900001234" + "复盘" * 5000}),
+    ("post", "/reviews", {"text": TEXT, "request_id": "13900001234"}),
+    ("post", "/reviews", {"text": TEXT, "13900001234": "private"}),
+    ("get", "/reviews/13900001234", None),
+    ("post", "/reviews/13900001234/index", None),
+    ("get", "/reviews?limit=13900001234", None),
+])
+def test_query_app_review_validation_never_echoes_input(components, invalid_request):
+    from knowledge.api.query_api import create_app
+    collection, extractor, service = components
+    app = create_app(summary_enabled=False)
+    app.dependency_overrides[get_review_service] = lambda: service
+    method, path, payload = invalid_request
+    with TestClient(app) as client:
+        response = client.request(method, path, json=payload)
+    assert response.status_code == 422
+    assert "13900001234" not in response.text and "private" not in response.text
+    assert collection.count_documents({}) == 0
+    extractor.extract.assert_not_called()
