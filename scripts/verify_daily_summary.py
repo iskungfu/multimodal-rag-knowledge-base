@@ -9,6 +9,7 @@ import threading
 import uuid
 from datetime import date, datetime, timedelta, time
 from time import monotonic
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -25,7 +26,7 @@ def main():
     if args.host:
         from dotenv import load_dotenv
         load_dotenv(ROOT / 'knowledge/.env')
-    os.environ.update(DAILY_SUMMARY_ENABLED='0', HF_HUB_OFFLINE='1')
+    os.environ.update(DAILY_SUMMARY_ENABLED='0', MARKET_COLLECTION_ENABLED='0', HF_HUB_OFFLINE='1')
     db_name = os.getenv('AFK_TEST_DB_NAME')
     if not db_name or db_name in {os.getenv('MONGO_DB_NAME'), 'kb001', 'admin', 'local', 'config'}:
         print('必须提供独立 AFK_TEST_DB_NAME。')
@@ -59,6 +60,7 @@ def main():
         from knowledge.service.market_service import MarketService
         from knowledge.market.repository import MarketQuoteRepository
         from knowledge.market.models import SHANGHAI, date_window
+        from knowledge.market.calendar import TradingCalendar
         from knowledge.strategy.vectors import StrategyVectors
         from knowledge.strategy.repository import StrategyRepository
         from knowledge.api.summary_api import router, get_summary_service
@@ -182,7 +184,10 @@ def main():
         summaries.update_one({'owner_id': service.owner, 'date': str(day)}, {'$set': {'status': 'failed', 'error': '验收重试'}})
         old_now = service.now
         service.now = lambda: datetime.combine(day, time(23), SHANGHAI)
-        scheduler = build_scheduler(lambda: service)
+        calendar_status = TradingCalendar().status(day)
+        report['scheduler_calendar'] = calendar_status
+        check('scheduler_target_trading_day', calendar_status['is_trading_day'] is True)
+        scheduler = build_scheduler(lambda: service, calendar_factory=lambda: SimpleNamespace(status=lambda: calendar_status))
         event = threading.Event()
         from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
         scheduler.add_listener(lambda result: event.set() if result.job_id == 'accept-once' else None,

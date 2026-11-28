@@ -9,6 +9,7 @@ import pytest
 from pymongo import MongoClient
 
 from knowledge.market.models import date_window
+from knowledge.market.calendar import TradingCalendar
 from knowledge.summary.indices import INDICES, EastmoneyIndexAdapter, TencentIndexAdapter, IndexRepository, IndexService
 from knowledge.summary.repository import SummaryRepository, WatchlistRepository, LEASE_SECONDS
 from knowledge.summary.strategies import StrategyChecklistModel
@@ -116,7 +117,14 @@ def test_real_llm_api_market_storage_and_scheduler(storage):
         assert client.post('/daily-summaries/generate', json={'date': day.isoformat()}).json()['started'] is False
     from knowledge.market.models import SHANGHAI
     service.now = lambda: datetime.combine(day, time(23), SHANGHAI)
-    build_scheduler(lambda: service).get_job('daily-summary').func()
+    calendar_status = TradingCalendar().status(day)
+    assert calendar_status['is_trading_day'] is True
+    storage.summaries.update_one({'owner_id': service.owner, 'date': str(day)},
+                                 {'$set': {'status': 'failed', 'error': '验收重试'}})
+    scheduler = build_scheduler(lambda: service, calendar_factory=lambda: SimpleNamespace(status=lambda: calendar_status))
+    scheduler.get_job('daily-summary').func()
+    scheduled = storage.summaries.find_one({'owner_id': service.owner, 'date': str(day)})
+    assert scheduled['status'] == 'completed' and scheduled['attempts'] == record['attempts'] + 1
     assert storage.summaries.count_documents({}) == 1
     assert storage.indices.count_documents({}) > 40
     print('真实指数/个股 + 实际 LLM + API/调度入口 + 独立 MongoDB 通过（固定策略上下文，无 BGE）')

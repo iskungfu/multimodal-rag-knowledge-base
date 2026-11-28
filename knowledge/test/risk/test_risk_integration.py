@@ -1,6 +1,7 @@
 """显式启用的真实源/独立 MongoDB/模型验收，不代表完整 BGE RAG 或浏览器验收。"""
 import os
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import Mock
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ from pymongo.errors import PyMongoError
 
 from knowledge.market.adapters import EastmoneyAdapter, TencentAdapter
 from knowledge.market.repository import MarketQuoteRepository
+from knowledge.market.models import date_window
 from knowledge.service.market_service import MarketService
 from knowledge.service.query_service import QueryService
 from knowledge.service.risk_service import RiskService
@@ -51,7 +53,8 @@ def test_live_quotes_through_chat_to_mongodb(isolated_storage, adapter_type):
     resolver = SymbolResolver()
     graph = Mock()
     graph.invoke.side_effect = AssertionError('个股不应进入商品 RAG')
-    with api(QueryService(resolver, RiskService(lambda: market), graph)) as client:
+    observed_at = datetime.now(timezone.utc)
+    with api(QueryService(resolver, RiskService(lambda: market, now=lambda: observed_at), graph)) as client:
         sync = assert_answer(client, '平安银行（000001）的风险如何？', False)
         streamed = assert_answer(client, '000001风险', True)
     assert '平安银行' in sync and '实际行情日期' in sync and adapter_type.name in sync
@@ -66,7 +69,15 @@ def test_live_quotes_through_chat_to_mongodb(isolated_storage, adapter_type):
         assert '20 日波动率：缺失' in sync and '成交量比：缺失' in sync
         assert '有限依据' in sync or '无法完整评估' in sync
     else:
-        assert '个股风险：' in sync and '风险：无法完整评估' not in sync
+        assert '个股风险：' in sync
+        assert all(label + '：缺失' not in sync for label in ('日涨跌幅', '换手率', '20 日波动率', '动态 PE', '成交量比'))
+        _, requested_end = date_window(None, None, observed_at)
+        if latest['date'] < requested_end.isoformat():
+            assert '资料有限' in sync and '最新日期早于可收盘日期' in sync
+            assert '个股风险：低风险' not in sync
+            assert '无法完整评估' in sync or '有限依据' in sync
+        else:
+            assert '风险：无法完整评估' not in sync
     print(f'真实 {adapter_type.name}: date={latest["date"]}, rows={collection.count_documents({})}, API/SSE/status/history 一致')
 
 

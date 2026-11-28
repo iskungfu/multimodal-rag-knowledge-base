@@ -6,7 +6,7 @@
 
 通过 LangGraph 编排导入与查询，使用 BGE-M3 混合向量检索、RRF、BGE-Reranker 和独立行情数据。个人使用阶段免登录，不执行交易。完整需求状态及验证边界见 [需求验收清单](docs/requirements-acceptance.md)。
 
-使用说明：[个人档案与策略模式](docs/personal-settings.md)、[复盘记录](docs/trade-reviews.md)、[每日摘要](docs/daily-summary.md)、[全市场收盘采集](docs/market-collection.md)、[BaoStock与交易日历](docs/baostock-and-calendar.md)、[公共导入隐私](docs/public-import.md)。
+首次使用见[个人使用指南](docs/personal-use-guide.md)。模块说明：[个人档案与策略模式](docs/personal-settings.md)、[复盘记录](docs/trade-reviews.md)、[每日摘要](docs/daily-summary.md)、[全市场收盘采集](docs/market-collection.md)、[BaoStock与交易日历](docs/baostock-and-calendar.md)、[公共导入隐私](docs/public-import.md)。
 
 ## 核心功能
 
@@ -264,9 +264,9 @@ python -m venv .venv
 # 3. 安装依赖
 pip install -r requirements.txt
 
-# 4. 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，填入实际的 API Key、模型路径、服务地址等
+# 4. 首次配置环境变量，已有 knowledge/.env 时跳过复制
+cp .env.example knowledge/.env
+# 编辑 knowledge/.env，填入实际的 API Key、模型路径、服务地址等
 ```
 
 ### 下载模型
@@ -282,17 +282,19 @@ python -c "from modelscope import snapshot_download; snapshot_download('BAAI/bge
 ### 运行服务
 
 ```bash
-# 启动导入服务（端口 8000）
-cd knowledge
-uvicorn api.import_api:create_app --host 0.0.0.0 --port 8000 --factory --reload
+# 在项目根目录启动导入服务（端口 8000）
+python -m uvicorn knowledge.api.import_api:create_app --host 127.0.0.1 --port 8000 --factory --env-file knowledge/.env
 
-# 启动查询服务（端口 8001）
-# uvicorn api.query_api:create_app --host 0.0.0.0 --port 8001 --factory --reload
+# 另开一个终端，激活同一环境并保持项目根目录，启动查询服务（端口 8001）
+python -m uvicorn knowledge.api.query_api:create_app --host 127.0.0.1 --port 8001 --factory --env-file knowledge/.env
 ```
 
 **访问地址：**
 - 文档导入页面：http://localhost:8000/front/import.html
-- API 文档（Swagger）：http://localhost:8000/docs
+- 投资助手页面：http://localhost:8001/front/chat.html
+- API 文档（Swagger）：http://localhost:8000/docs 和 http://localhost:8001/docs
+
+命令从包含 `knowledge` 的项目根目录执行；切到 `knowledge` 后会影响包导入。个人环境默认只监听本机。查询服务保持运行才能执行自动摘要与收盘采集，默认时间分别为 Asia/Shanghai 工作日15:30、16:00；明确休市时跳过，离线错过后可在页面手动补生成/补采。
 
 ## API 接口
 

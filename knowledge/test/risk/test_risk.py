@@ -103,6 +103,24 @@ def test_partial_high_is_explicit_and_snapshot_cannot_be_low():
     assert "高风险（有限依据" in answer and "成交量比：缺失" in answer
 
 
+@pytest.mark.parametrize("change, conclusion", [
+    (0.1, "个股风险：无法完整评估"),
+    (5, "个股风险：中风险（有限依据，仅反映已观测指标）"),
+])
+def test_weekend_previous_close_keeps_observed_risk_without_claiming_current_low(change, conclusion):
+    market = Mock()
+    data = quotes()
+    data[-1]["change_pct"] = change
+    market.refresh.return_value = dict(source="eastmoney", quotes=data, warnings=[])
+    service = RiskService(lambda: market, now=lambda: NOW + timedelta(days=1))
+    answer = service.answer(SECURITY)
+    assert conclusion in answer
+    assert "实际行情日期：2026-11-27" in answer and "距查询日 1 个自然日" in answer
+    assert "最新日期早于可收盘日期" in answer and "资料有限" in answer
+    assert "个股风险：低风险" not in answer
+    assert "20 日波动率：缺失" not in answer and "成交量比：缺失" not in answer
+
+
 def test_fresh_full_data_and_refresh_failure_old_cache():
     market = Mock()
     market.refresh.return_value = dict(source="eastmoney", quotes=quotes(), warnings=["部分日期没有可核实的动态 PE，缺失估值保留为空"])

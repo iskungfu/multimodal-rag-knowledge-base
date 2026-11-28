@@ -19,6 +19,7 @@ import re
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import unquote, urlsplit
 import uuid
@@ -217,6 +218,7 @@ def isolated_environment(test_db, host, prefix):
     return {
         "MONGO_DB_NAME": test_db,
         "DAILY_SUMMARY_ENABLED": "0",
+        "MARKET_COLLECTION_ENABLED": "0",
         "STRATEGY_COLLECTION": prefix + "_personal",
         "CHUNKS_COLLECTION": prefix + "_knowledge",
         "REVIEW_COLLECTION": prefix + "_review",
@@ -514,6 +516,21 @@ class Acceptance:
                                  PersonalStrategyRetriever(self.documents, self.vectors["personal"]),
                                  knowledge=PublicKnowledgeRetriever(self.real_retriever), settings=self.settings_repository.read)
         self.summary = summary
+        original_select = summary.model.select
+        def observed_summary_select(items, evidence, **options):
+            started = time.monotonic()
+            call = {"status": "started"}
+            self.report.setdefault("summary_model_calls", []).append(call)
+            try:
+                result = original_select(items, evidence, **options)
+                call["status"] = "completed"
+                return result
+            except Exception as exc:
+                call.update(status="failed", error_type=type(exc).__name__)
+                raise
+            finally:
+                call["seconds"] = round(time.monotonic() - started, 2)
+        summary.model.select = observed_summary_select
         self.stack.enter_context(patch.object(mongo_history_util, "_get_collection", lambda: self.history))
         self.stack.enter_context(patch.object(StorageClients, "get_mongo_client", lambda: self.mongo))
         self.stack.enter_context(patch.object(StorageClients, "get_milvus_client", lambda: self.milvus))
@@ -532,6 +549,7 @@ class Acceptance:
         from datetime import date, time as day_time
         from fastapi.testclient import TestClient
         from knowledge.market.models import SHANGHAI, date_window
+        from knowledge.market.calendar import TradingCalendar
         from knowledge.summary.scheduler import build_scheduler
         from knowledge.summary.indices import EastmoneyIndexAdapter
         from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
@@ -619,7 +637,11 @@ class Acceptance:
                                                        {'$set': {'status': 'failed', 'error': '验收重试'}})
             original_now = self.summary.now
             self.summary.now = lambda: datetime.combine(day, day_time(23), SHANGHAI)
-            scheduler = build_scheduler(lambda: self.summary)
+            calendar_status = TradingCalendar().status(day)
+            self.report['scheduler_calendar'] = calendar_status
+            self.check('mvp_scheduler_target_trading_day', calendar_status['is_trading_day'] is True)
+            scheduler = build_scheduler(lambda: self.summary,
+                                        calendar_factory=lambda: SimpleNamespace(status=lambda: calendar_status))
             finished = threading.Event()
             scheduler.add_listener(lambda event: finished.set() if event.job_id == 'mvp-once' else None,
                                    EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
@@ -630,7 +652,10 @@ class Acceptance:
                 while not finished.wait(30) and time.monotonic() < deadline:
                     print('等待隔离摘要调度验收完成…', flush=True)
                 scheduled = self.db[self.names['summaries']].find_one({'owner_id': OWNER, 'date': str(day)})
+                self.report['scheduler'] = {'event_received': finished.is_set(), 'status': scheduled.get('status'),
+                                            'attempts': scheduled.get('attempts'), 'error': scheduled.get('error')}
                 self.check('mvp_scheduler_current_mode', finished.is_set() and scheduled['status'] == 'completed'
+                           and scheduled['attempts'] == record['attempts'] + 1
                            and scheduled['result']['personalization']['mode_id'] == second_mode
                            and bool(scheduled['result']['strategies']) and all(item['document_id'] == second_id
                                for item in scheduled['result']['strategies']))
