@@ -1,7 +1,7 @@
 # ADR-0006: 系统架构与技术栈调整
 
 ## 状态
-已提议
+已接受；原件保存提议由 ADR-0008 替代，正式功能状态见 `docs/requirements-acceptance.md`。
 
 ## 背景
 前 5 个 ADR 已确定行情引擎、个性化投资助手、风险评估、脱敏合规等能力。本 ADR 将它们串联为可落地的系统架构，服务于个人使用阶段（后续可逐步演进至上线版本）。
@@ -41,7 +41,7 @@
 | 行情数据 | 无 | 免费 A 股行情接口（东方财富/新浪/腾讯） |
 | 向量库 | Milvus | 复用，新增 `owner_id` 与 `doc_type` 标量过滤字段，类型为 `personal`/`knowledge`/`review` |
 | 文档库 | MongoDB | 复用，新增 `market_quotes`、`trade_reviews`、`daily_summaries` 集合 |
-| 对象存储 | MinIO | 复用，存策略文档 PDF |
+| 对象存储 | MinIO | 保留已有资产；新上传原件/图片不持久备份，只保存脱敏文本（ADR-0008） |
 | 前端 | HTML + JS | 原地扩展页面模块 |
 
 ## 替代方案

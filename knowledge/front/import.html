@@ -60,23 +60,23 @@
                 <span class="dropzone-icon" data-icon="upload" data-icon-size="24" aria-hidden="true"></span>
                 <p class="dropzone-title">拖拽文件到这里</p>
                 <p class="dropzone-sub">或 <span class="link-strong">从本地选择</span></p>
-                <p class="dropzone-hint" id="uploadHint">支持 PDF、Markdown · 单文件最大 50 MB</p>
+                <p class="dropzone-hint" id="uploadHint">支持 PDF、Markdown、UTF-8 TXT · 单文件最大 50 MB</p>
             </div>
 
             <input
                     type="file"
                     id="fileInput"
                     class="sr-only"
-                    accept=".pdf,.md,.markdown,application/pdf,text/markdown"
-                    aria-label="选择要导入的 PDF 或 Markdown 文件"
+                    accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain"
+                    aria-label="选择要导入的 PDF、Markdown 或 UTF-8 TXT 文件"
                     tabindex="-1"
                     multiple>
 
             <ul class="upload-rules">
-                <li>个人策略正文会脱敏；图片不进入策略库</li>
+                <li>个人策略与公共文档均仅保存脱敏文本，图片不入库</li>
                 <li>PDF 原件会发送给解析服务，任务结束后清理本地临时文件</li>
                 <li>任务在服务端后台执行，可同时上传多个文件</li>
-                <li>个人策略问答将在投资助手功能中接入</li>
+                <li>导入完成后，可在智能问答中引用资料</li>
             </ul>
             <form id="strategyTextForm" class="strategy-form">
                 <h2>直接写下个人策略</h2>

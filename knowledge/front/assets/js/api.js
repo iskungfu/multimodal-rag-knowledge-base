@@ -295,6 +295,10 @@ export function connectStream(taskId, handlers = {}) {
 
 /* 每日投资摘要；生成请求立即返回，随后读取持久化状态。 */
 export const fetchWatchlist = () => request('/watchlist');
+export const fetchMarketCollection = (date) => request(`/market/collection/${date ? encodeURIComponent(date) : 'latest'}`);
+export const collectMarket = (date) => request('/market/collection/run', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({date, retry: true}),
+});
 export const addWatch = (query) => request('/watchlist', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({query}),
 });

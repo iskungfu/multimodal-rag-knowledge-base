@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
 from knowledge.api.market_api import router as market_router
+from knowledge.api.market_collection_api import router as collection_router
 from knowledge.api.review_api import router as review_router
 from knowledge.api.settings_api import router as settings_router
 from knowledge.api.summary_api import router as summary_router, summary_validation_error
@@ -172,6 +173,7 @@ def create_app(*, summary_enabled=None) -> FastAPI:
 
     register_router(app)
     app.include_router(market_router)
+    app.include_router(collection_router)
     app.include_router(review_router)
     app.include_router(summary_router)
     app.include_router(settings_router)

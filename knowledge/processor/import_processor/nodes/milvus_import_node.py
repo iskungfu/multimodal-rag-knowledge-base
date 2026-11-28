@@ -232,7 +232,7 @@ class MilvusImportNode(BaseNode):
         try:
             milvus_client = StorageClients.get_milvus_client()
         except Exception as e:
-            self.logger.error(f"获取Milvus客户端失败,失败信息:{e}")
+            self.logger.error("获取向量存储失败")
             raise MilvusError(node_name=self.name, message=f"获取Milvus客户端失败,{e}")
         #2. 从配置中获取存储chunk的Collection的名称
         collection_name = self.config.chunks_collection

@@ -30,6 +30,9 @@ class ImportGraphState(TypedDict, total=False):
 
     task_id: str  # 任务 ID，用于任务追踪(web交互的时候用到，实时看到节点的处理日志)
 
+    owner_id: str
+    document_title: str
+
     # ==================== 控制标志 ====================
 
     is_md_read_enabled: bool  # 是否启用 MD 读取

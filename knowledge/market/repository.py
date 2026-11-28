@@ -30,3 +30,16 @@ class MarketQuoteRepository:
             {"code": code, "date": {"$gte": start.isoformat(), "$lte": end.isoformat()}},
             {"_id": 0, "raw": 0},
         ).sort("date", ASCENDING))
+
+    def save_missing(self, quotes):
+        stored = []
+        for quote in quotes:
+            document = quote.model_dump()
+            document["date"] = quote.date.isoformat()
+            query = {"code": quote.code, "date": document["date"]}
+            try:
+                self.collection.update_one(query, {"$setOnInsert": document}, upsert=True)
+            except DuplicateKeyError:
+                pass
+            stored.append(self.collection.find_one(query))
+        return stored

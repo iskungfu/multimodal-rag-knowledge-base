@@ -10,7 +10,7 @@
 - 两个服务的旧 `/status/{task_id}` 都不能绕过个人状态接口。其他用户或其他类型的记录返回 404。
 - MongoDB 新集合 `strategy_documents` 保存脱敏标题、文件名、归属和任务状态；正文切片存入 Milvus。
 - 个人策略使用独立 LangGraph，复用 `EntryNode → PdfToMdNode（仅 PDF）→ DocumentSplitNode → BgeEmbeddingChunksNode`，在切分前执行 `StrategyPrivacyNode`，最后写入有隔离字段的 collection。不调用商品名识别，也不调用商品名确认。BGE-M3 保留现有稠密/稀疏向量流程。
-- 本轮不提供投资问答、RRF 三路召回或回答生成。内部 `StrategyVectors.search(..., owner_id)` 是供 #7 使用的受限召回基础。
+- 投资问答、RRF三路召回及回答生成已由后续 #7 接入，见 `docs/personalized-investment-assistant.md`。内部 `StrategyVectors.search(..., owner_id)` 为受限召回基础。
 
 ## collection 兼容与配置
 

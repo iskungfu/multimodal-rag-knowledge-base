@@ -29,6 +29,8 @@ class WatchRequest(BaseModel):
 
 
 async def summary_validation_error(request, exc):
+    if request.url.path.startswith("/market/collection"):
+        return JSONResponse(status_code=422, content={"detail": "采集参数无效，请检查收盘日期和重试标记"})
     if request.url.path.startswith("/investor-settings"):
         return JSONResponse(status_code=422, content={"detail": "档案参数无效，请检查偏好、模式、文档编号和版本"})
     if request.url.path == "/reviews" or request.url.path.startswith("/reviews/"):
@@ -99,7 +101,7 @@ def delete_watch(code: str, service=Depends(get_summary_service)):
         try:
             market_symbol(code)
         except ValueError:
-            raise SummaryInputError("请提供有效的沪深 A 股六位代码") from None
+            raise SummaryInputError("请提供有效的沪深京 A 股六位代码") from None
         return {"items": service.watchlist.remove(service.owner, code)}
     return call(action)
 

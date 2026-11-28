@@ -14,6 +14,8 @@ router = APIRouter(prefix="/strategies", tags=["strategies"])
 
 
 async def strategy_validation_error(request, exc):
+    if request.url.path == "/upload":
+        return JSONResponse(status_code=422, content={"detail": "上传参数无效，请选择 PDF、Markdown 或 UTF-8 文字文件"})
     if request.url.path.startswith("/strategies"):
         # Pydantic 的默认响应含原始 input；个人文档校验失败也不能回显原文。
         return JSONResponse(status_code=422, content={"detail": "策略参数无效，请检查正文、标题和文件格式"})

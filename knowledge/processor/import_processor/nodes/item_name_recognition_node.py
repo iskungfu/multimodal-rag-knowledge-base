@@ -25,6 +25,7 @@ from knowledge.prompts.import_prompt import ITEM_NAME_SYSTEM_PROMPT, ITEM_NAME_U
 from knowledge.utils.clients.ai_clients import AIClients
 from knowledge.utils.clients.storage_clients import StorageClients
 from knowledge.utils.embedding_util import generate_bge_m3_hybrid_vectors
+from knowledge.review.privacy import redact_text
 
 
 class ItemNameRecognitionNode(BaseNode):
@@ -44,7 +45,7 @@ class ItemNameRecognitionNode(BaseNode):
         # print(item_name_context)
         #3. 调用LLM提取商品名(失败则降级使用file_title)
         self.log_step(step_name="Step3", message="调用LLM提取商品名")
-        item_name = self._recognition_item_name(item_name_context, file_title)
+        item_name = redact_text(self._recognition_item_name(item_name_context, file_title))
         # print(item_name)
         #4. 商品名向量化(稠密向量 + 稀疏向量)
         self.log_step(step_name="Step4", message="商品名向量化")
@@ -57,7 +58,8 @@ class ItemNameRecognitionNode(BaseNode):
         #6. 回填item_name到chunks与state
         self._fill_back(item_name, chunks, state)
         #7. 备份带item_name的chunks,便于后续节点单独测试
-        self._backup_chunks(chunks, state)
+        if not state.get("owner_id"):
+            self._backup_chunks(chunks, state)
 
         return state
 
@@ -132,7 +134,7 @@ class ItemNameRecognitionNode(BaseNode):
         try:
             llm_client = AIClients.get_llm_client(False)
         except ConnectionError as e:
-            self.logger.error(f"获取llm_client失败，失败信息为{e}")
+            self.logger.error("获取名称识别模型失败")
             #兜底:使用file_title作为商品名
             return file_title
 
@@ -150,18 +152,18 @@ class ItemNameRecognitionNode(BaseNode):
         try:
             resp = llm_client.invoke([system_message, human_message])
         except Exception as e:
-            self.logger.warning(f"执行llm提取item_name失败,失败信息{e}")
+            self.logger.warning("名称识别失败，使用文档标题")
             #兜底:使用file_title作为商品名
             return file_title
 
         #5. 解析响应数据
-        llm_result = resp.content.strip()
+        llm_result = redact_text(resp.content.strip())
         if not llm_result or llm_result.upper() in ("UNKNOW", "UNKNOWN"):
             self.logger.warning("执行llm提取item_name失败,大模型未识别出商品名")
             #兜底:使用file_title作为商品名
             return file_title
 
-        self.logger.info(f"提取item_name成功,item_name={llm_result}")
+        self.logger.info("主体名称识别完成")
         return llm_result
 
     def _embedding_item_name(self, item_name: str) -> Tuple[List[float], Dict[int, float]]:
@@ -169,14 +171,14 @@ class ItemNameRecognitionNode(BaseNode):
         try:
             embedding_client = AIClients.get_bge_m3_client()
         except (EnvironmentError, ConnectionError) as e:
-            self.logger.error(f"获取嵌入模型对象失败,错误信息:{e}")
+            self.logger.error("获取嵌入模型失败")
             raise EmbeddingError(node_name=self.name, message="获取嵌入模型对象失败")
 
         # 2. 调用公共工具生成混合向量(检索侧编码用户问题也复用这个函数)
         try:
             hybrid_vectors = generate_bge_m3_hybrid_vectors(embedding_client, [item_name])
         except (ValueError, RuntimeError) as e:
-            self.logger.error(f"向量化失败,失败信息{e}")
+            self.logger.error("主体名称向量化失败")
             raise EmbeddingError(node_name=self.name, message="向量化失败")
         # 3. 本次只编码了一个文档,取第一个即可
         dense_vector = hybrid_vectors["dense"][0]
@@ -195,7 +197,7 @@ class ItemNameRecognitionNode(BaseNode):
         try:
             milvus_client = StorageClients.get_milvus_client()
         except Exception as e:
-            self.logger.warning(f"获取Milvus客户端失败,{e}")
+            self.logger.warning("获取向量存储失败")
             return
         # 3. 判断存储item_name的Collection是否存在，如果不存在则创建Collection
         collection_name = self.config.item_name_collection

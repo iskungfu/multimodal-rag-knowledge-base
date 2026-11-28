@@ -13,7 +13,7 @@ from knowledge.processor.import_processor.nodes.bge_embedding_chunks_node import
 from knowledge.processor.import_processor.nodes.document_split_node import DocumentSplitNode
 from knowledge.processor.import_processor.nodes.entry_node import EntryNode
 from knowledge.processor.import_processor.nodes.item_name_recognition_node import ItemNameRecognitionNode
-from knowledge.processor.import_processor.nodes.md_image_node import MdImageNode
+from knowledge.processor.import_processor.nodes.public_privacy_node import PublicPrivacyNode
 from knowledge.processor.import_processor.nodes.milvus_import_node import MilvusImportNode
 from knowledge.processor.import_processor.nodes.pdf_to_md_node import PdfToMdNode
 from knowledge.processor.import_processor.state import ImportGraphState
@@ -39,7 +39,7 @@ def import_graph():
     node_list = {
         "entry_node": EntryNode(),
         "pdf_to_md_node": PdfToMdNode(),
-        "md_image_node": MdImageNode(),
+        "public_privacy_node": PublicPrivacyNode(),
         "document_split_node": DocumentSplitNode(),
         "item_name_recognition_node": ItemNameRecognitionNode(),
         "bge_embedding_chunks_node": BgeEmbeddingChunksNode(),
@@ -53,24 +53,15 @@ def import_graph():
     work_flow.set_entry_point("entry_node")
 
     #2.4 添加边
-    """
-    entry_node ----> 条件边: 判断pdf还是md,如果是pdf -----> pdf_to_md_node,如果是md ----> md_image_node
-    pdf_to_md_node ----> md_image_node
-    md_image_node -----> document_split_node
-    document_split_node ----> item_name_recognition_node
-    item_name_recognition_node ----> bge_embedding_chunks_node
-    bge_embedding_chunks_node ----> milvus_import_node
-    milvus_import_node -----> END
-    """
     #2.4.1 条件边
     work_flow.add_conditional_edges("entry_node", import_router,
                                     {
                                         "pdf_router": "pdf_to_md_node",
-                                        "md_router": "md_image_node"
+                                        "md_router": "public_privacy_node"
                                     })
     #2.4.2 业务边
-    work_flow.add_edge("pdf_to_md_node", "md_image_node")
-    work_flow.add_edge("md_image_node", "document_split_node")
+    work_flow.add_edge("pdf_to_md_node", "public_privacy_node")
+    work_flow.add_edge("public_privacy_node", "document_split_node")
     work_flow.add_edge("document_split_node", "item_name_recognition_node")
     work_flow.add_edge("item_name_recognition_node", "bge_embedding_chunks_node")
     work_flow.add_edge("bge_embedding_chunks_node", "milvus_import_node")

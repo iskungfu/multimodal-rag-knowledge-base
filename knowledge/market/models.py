@@ -1,6 +1,7 @@
 """统一单位：价格/金额/市值为元，成交量为股，涨跌幅/换手率为百分数。"""
 
 import re
+import unicodedata
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -13,9 +14,15 @@ class MarketUnavailable(Exception):
     """来源无有效收盘数据（对外只返回固定消息，不泄露连接信息）。"""
 
 
+def security_name(name):
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", name))
+
+
 def market_symbol(code: str) -> str:
-    if not re.fullmatch(r"(?:60[0135]|68[89]|00[0-3]|30[01])[0-9]{3}", code):
-        raise ValueError("仅支持沪深 A 股六位股票代码")
+    if re.fullmatch(r"920[0-9]{3}", code):
+        return "bj" + code
+    if not re.fullmatch(r"(?:60[0135]|68[89]|00[0-3]|30[0-2])[0-9]{3}", code):
+        raise ValueError("仅支持沪深 A 股和北交所 920 六位股票代码")
     return ("sh" if code.startswith("6") else "sz") + code
 
 

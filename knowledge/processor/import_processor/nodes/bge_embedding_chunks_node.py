@@ -81,7 +81,7 @@ class BgeEmbeddingChunksNode(BaseNode):
         try:
             embedding_client = AIClients.get_bge_m3_client()
         except (EnvironmentError, ConnectionError) as e:
-            self.logger.error(f"获取BGE-M3嵌入模型对象失败,失败信息:{e}")
+            self.logger.error("获取BGE-M3嵌入模型失败")
             raise EmbeddingError(node_name=self.name, message="获取BGE-M3嵌入模型对象失败")
         #2. 从配置中获取批次大小,也就是一批次最多嵌入多少条chunk
         batch_size = self.config.embedding_batch_size
@@ -113,7 +113,7 @@ class BgeEmbeddingChunksNode(BaseNode):
         try:
             hybrid_vectors = generate_bge_m3_hybrid_vectors(embedding_client, embedding_documents)
         except (ValueError, RuntimeError) as e:
-            self.logger.error(f"嵌入向量失败,失败信息:{e}")
+            self.logger.error("嵌入向量失败")
             raise EmbeddingError(node_name=self.name, message="嵌入向量失败")
         #3. 按顺序把向量回填到当前批次的chunk中
         dense_vector_list = hybrid_vectors["dense"]

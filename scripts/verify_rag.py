@@ -34,6 +34,7 @@ def main():
     os.environ.update({
         "MONGO_DB_NAME": test_db,
         "DAILY_SUMMARY_ENABLED": "0",
+        "MARKET_COLLECTION_ENABLED": "0",
         "ITEM_NAME_COLLECTION": collections[0],
         "CHUNKS_COLLECTION": collections[1],
         "STRATEGY_COLLECTION": run_id + "_empty_personal",
@@ -148,7 +149,7 @@ def main():
                     status = importer.get("/status/" + task_id).json()
                     check("import_completed", status["status"] == "completed", status)
                 objects = list(clients.get_minio().list_objects(bucket, recursive=True))
-                check("minio_backup", any(obj.object_name.endswith(filename) for obj in objects))
+                check("no_original_or_image_backup", not objects)
                 for name in collections:
                     milvus.flush(name, timeout=30)
                 rows = milvus.query(collections[1], filter="", output_fields=["content", "dense_vector", "sparse_vector"], limit=20, consistency_level="Strong")

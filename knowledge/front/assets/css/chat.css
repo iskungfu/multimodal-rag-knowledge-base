@@ -957,6 +957,8 @@
 .watch-list, .summary-history { padding-left: 20px; overflow-wrap: anywhere; }
 .summary-content { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 32rem; overflow-y: auto; }
 .summary-panel p, .summary-panel button { overflow-wrap: anywhere; }
+#marketCollectionPanel button { min-height: 44px; white-space: normal; }
+#marketCollectionMissing { overflow-wrap: anywhere; }
 @media (max-width: 480px) {
     .summary-controls { align-items: stretch; }
     .summary-controls label { flex-basis: 100%; }

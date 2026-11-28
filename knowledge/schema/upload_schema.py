@@ -11,6 +11,7 @@ class UploadResponse(BaseModel):
 class TaskStatusResponse(BaseModel):
     """任务状态响应 —— GET /status/{task_id} 返回"""
     status: str = Field(..., description="任务状态")
+    error: str = ""
     done_list: List[str] = Field(..., description="已完成节点列表")
     running_list: List[str] = Field(..., description="正在运行节点列表")
     durations: Dict[str, float] = Field(default=dict, description="各节点耗时(秒)")

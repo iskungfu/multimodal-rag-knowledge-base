@@ -8,7 +8,7 @@ from starlette.staticfiles import StaticFiles
 from knowledge.core.deps import get_file_process_service
 from knowledge.schema.upload_schema import UploadResponse, TaskStatusResponse
 from knowledge.core.paths import get_front_page_dir
-from knowledge.service.file_process_service import FileProcessService
+from knowledge.service.file_process_service import FileProcessService, PublicImportInputError
 
 from knowledge.utils.task_util import get_task_info, get_task_result
 from knowledge.api.strategy_api import router as strategy_router, strategy_validation_error
@@ -24,7 +24,12 @@ def register_router(app: FastAPI):
                     background_tasks: BackgroundTasks,
                     file_process_service:FileProcessService = Depends(get_file_process_service)):
         #1. 将上传的文件进行处理(保存)
-        import_file_path,file_dir,task_id = file_process_service.process_upload_file(file)
+        try:
+            import_file_path,file_dir,task_id = file_process_service.process_upload_file(file)
+        except PublicImportInputError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except Exception:
+            raise HTTPException(503, "公共文档暂存失败，请稍后重试") from None
         #2. 执行导入的主流程
         background_tasks.add_task(file_process_service.run_main_graph,import_file_path,file_dir,task_id)
 
@@ -37,7 +42,7 @@ def register_router(app: FastAPI):
         #1. 获取当前任务的信息
         task_info = get_task_info(task_id)
 
-        return TaskStatusResponse(**task_info)
+        return TaskStatusResponse(**task_info, error=get_task_result(task_id, "error", ""))
 
 
 def create_app():

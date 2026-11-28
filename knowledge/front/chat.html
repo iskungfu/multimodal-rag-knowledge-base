@@ -107,6 +107,19 @@
             <div id="summaryContent" class="summary-content"></div>
             <details><summary>最近摘要记录</summary><ul id="summaryHistory" class="summary-history"></ul></details>
         </details>
+        <details class="review-panel summary-panel" id="marketCollectionPanel">
+            <summary>全市场收盘行情采集</summary>
+            <p class="answer-note">服务运行时，每个工作日 16:00 自动采集沪深京证券名单中的收盘行情。停牌、缺失数据和备用名单会明确显示；历史日只能补齐来源仍提供的数据。</p>
+            <div class="summary-controls">
+                <label for="marketCollectionDate">收盘日期</label>
+                <input id="marketCollectionDate" type="date" required>
+                <button id="marketCollectionStart" class="btn btn-primary btn-sm" type="button">采集 / 补齐缺失</button>
+                <button id="marketCollectionRefresh" class="btn btn-ghost btn-sm" type="button">查看此日进度</button>
+            </div>
+            <p id="marketCollectionStatus" role="status" aria-live="polite"></p>
+            <p id="marketCollectionError" role="alert"></p>
+            <ul id="marketCollectionMissing"></ul>
+        </details>
         <details class="review-panel" id="reviewPanel">
             <summary>交易复盘</summary>
             <form id="reviewForm">
@@ -190,5 +203,6 @@
 <script type="module" src="/front/assets/js/reviews.js"></script>
 <script type="module" src="/front/assets/js/summaries.js"></script>
 <script type="module" src="/front/assets/js/settings.js"></script>
+<script type="module" src="/front/assets/js/market-collection.js"></script>
 </body>
 </html>

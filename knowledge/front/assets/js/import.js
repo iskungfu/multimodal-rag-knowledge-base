@@ -20,12 +20,12 @@ import {
 } from './ui.js';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
-const ACCEPT_EXT = /\.(pdf|md|markdown)$/i;
+const ACCEPT_EXT = /\.(pdf|md|markdown|txt)$/i;
 
 const FLOW_COMMON = [
     '上传文件',
     '检查文件',
-    'Markdown图片处理',
+    '公共文档脱敏',
     '文档切分',
     '主体名称识别',
     '向量生成',
@@ -36,7 +36,7 @@ const FLOW_PDF = [
     '上传文件',
     '检查文件',
     'PDF转Markdown',
-    'Markdown图片处理',
+    '公共文档脱敏',
     '文档切分',
     '主体名称识别',
     '向量生成',
@@ -142,7 +142,7 @@ function addFiles(fileList) {
 
     files.forEach((file) => {
         if (!ACCEPT_EXT.test(file.name)) {
-            toast(`「${file.name}」格式不支持，仅支持 PDF 与 Markdown`, {type: 'error'});
+            toast(`「${file.name}」格式不支持，仅支持 PDF、Markdown 与 UTF-8 TXT`, {type: 'error'});
             return;
         }
         if (file.size === 0) {

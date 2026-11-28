@@ -4,6 +4,7 @@ from knowledge.processor.import_processor.base import BaseNode, T
 from knowledge.processor.import_processor.exceptions import StateFieldError, ValidationError
 from knowledge.processor.import_processor.state import ImportGraphState
 from pathlib import Path
+from knowledge.review.privacy import redact_text
 
 
 class EntryNode(BaseNode):
@@ -45,7 +46,8 @@ class EntryNode(BaseNode):
             raise ValidationError(node_name=self.name,message=f"unsupported file type:{suffix}")
 
         #4.获取文件标题，并将文件标题设置到state中
-        state["file_title"]=import_file_path_obj.stem
+        state["file_title"] = redact_text(state.get("document_title") or import_file_path_obj.stem)
+        state.setdefault("owner_id", "public")
 
         return state
 

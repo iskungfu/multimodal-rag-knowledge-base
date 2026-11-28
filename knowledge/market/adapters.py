@@ -161,13 +161,20 @@ class TencentAdapter:
         symbol = market_symbol(code)
         try:
             text = self.http.get(f"https://qt.gtimg.cn/q={symbol}").decode("gbk")
+            return [self.parse_snapshot(text, code, start, end, now)]
+        except PARSE_ERRORS:
+            raise MarketUnavailable("腾讯无有效收盘快照") from None
+
+    def parse_snapshot(self, text, code, start, end, now):
+        symbol = market_symbol(code)
+        try:
             if not text.startswith(f'v_{symbol}="'):
                 raise ValueError("代码不匹配")
             fields = text.split('"')[1].split("~")
             stamp = datetime.strptime(fields[30], "%Y%m%d%H%M%S").replace(tzinfo=SHANGHAI)
             if fields[2] != code or not start <= stamp.date() <= end or stamp > now or stamp.time() < wall_time(15):
                 raise ValueError("范围内无收盘快照")
-            return [DailyQuote(
+            return DailyQuote(
                 code=code, name=fields[1], date=stamp.date(), close=number(fields[3]),
                 pre_close=number(fields[4]), open=number(fields[5]), high=number(fields[33]), low=number(fields[34]),
                 volume=number(fields[6], 100), amount=number(fields[57], 10000),
@@ -175,6 +182,6 @@ class TencentAdapter:
                 pe=number(fields[52]), pb=number(fields[46]), market_cap=number(fields[45], 100000000),
                 source=self.name, valuation_source=self.name, source_time=stamp, updated_at=now,
                 raw={"snapshot": text},
-            )]
+            )
         except PARSE_ERRORS:
             raise MarketUnavailable("腾讯无有效收盘快照") from None
