@@ -11,6 +11,8 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from scripts.acceptance_report import begin_report, finish_report
+ENTRY_REPORT = begin_report({}) if __name__ == "__main__" else None
 
 
 def main():
@@ -26,6 +28,7 @@ def main():
     logging.disable(logging.CRITICAL)
     os.environ["HF_HUB_OFFLINE"] = "1"
     report = {"mode": "host" if args.host else "storage", "checks": {}, "cleanup": {}, "passed": False}
+    begin_report(report, entry_report=ENTRY_REPORT)
     mongo = milvus = minio = None
     created_collections = []
     mongo_collection = None
@@ -221,6 +224,7 @@ def main():
         report["passed"] = report["passed"] and all(report["cleanup"].values())
         output = ROOT / ".sandcastle/logs" / (run_id + ".json")
         output.parent.mkdir(parents=True, exist_ok=True)
+        finish_report(report)
         output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print("REPORT", output.name, "PASS" if report["passed"] else "FAIL", flush=True)
     return 0 if report["passed"] else 1

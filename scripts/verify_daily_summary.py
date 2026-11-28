@@ -14,6 +14,8 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from scripts.acceptance_report import begin_report, finish_report
+ENTRY_REPORT = begin_report({}) if __name__ == "__main__" else None
 
 
 def main():
@@ -30,6 +32,7 @@ def main():
     os.environ['HF_HUB_OFFLINE'] = '1'
     prefix = 'summary_accept_' + uuid.uuid4().hex[:16]
     report = {'mode': 'host' if args.host else 'storage', 'checks': {}, 'cleanup': {}, 'passed': False}
+    begin_report(report, entry_report=ENTRY_REPORT)
     runtime = None
 
     def check(name, result):
@@ -172,6 +175,7 @@ def main():
         report['passed'] = report['passed'] and all(report['cleanup'].values())
         folder = ROOT / '.sandcastle/logs'
         folder.mkdir(parents=True, exist_ok=True)
+        finish_report(report)
         (folder / (prefix + '.json')).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         print('结果：' + ('PASS' if report['passed'] else 'FAIL') + '；资源清理：' + str(report['cleanup']), flush=True)
     return 0 if report['passed'] else 1

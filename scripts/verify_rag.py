@@ -13,6 +13,8 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from scripts.acceptance_report import begin_report, finish_report
+ENTRY_REPORT = begin_report({}) if __name__ == "__main__" else None
 
 
 def main():
@@ -57,6 +59,7 @@ def main():
     log_dir = ROOT / ".sandcastle/logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     report = {"run_id": run_id, "format": "pdf" if args.pdf else "markdown", "stream": args.stream, "legacy": args.legacy, "knowledge": args.knowledge, "checks": {}, "cleanup": {}, "passed": False}
+    begin_report(report, entry_report=ENTRY_REPORT)
     console = sys.stdout
     started = time.monotonic()
     clients = None
@@ -260,6 +263,7 @@ def main():
                 report["seconds"] = round(time.monotonic() - started, 2)
                 report["passed"] = report["passed"] and all(report["cleanup"].values())
                 output = log_dir / (run_id + ".json")
+                finish_report(report)
                 output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print("REPORT", str(output), "PASS" if report["passed"] else "FAIL", flush=True)
     return 0 if report["passed"] else 1

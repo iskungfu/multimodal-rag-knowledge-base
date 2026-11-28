@@ -12,6 +12,8 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from scripts.acceptance_report import begin_report, finish_report
+ENTRY_REPORT = begin_report({}) if __name__ == "__main__" else None
 
 
 class UnavailableSource:
@@ -41,6 +43,7 @@ def main():
     run_id = "market_fallback_" + uuid4().hex[:12]
     report = {"run_id": run_id, "checked_at": now.isoformat(), "checks": {}, "samples": [], "cleanup": {}, "passed": False,
               "scope": "five-stock-sample", "faults_injected": ["batch_snapshot", "primary_history_for_api_and_batch"]}
+    begin_report(report, entry_report=ENTRY_REPORT)
     started = time.monotonic()
     mongo = None
     collection = None
@@ -149,6 +152,7 @@ def main():
         directory = ROOT / ".sandcastle/logs"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / (run_id + ".json")
+        finish_report(report)
         path.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         print("report", str(path), flush=True)
     return 0 if report["passed"] else 1

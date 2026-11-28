@@ -8,6 +8,8 @@
 
 首次使用见[个人使用指南](docs/personal-use-guide.md)。模块说明：[个人档案与策略模式](docs/personal-settings.md)、[复盘记录](docs/trade-reviews.md)、[每日摘要](docs/daily-summary.md)、[全市场收盘采集](docs/market-collection.md)、[BaoStock与交易日历](docs/baostock-and-calendar.md)、[公共导入隐私](docs/public-import.md)。
 
+开发检查使用 `python -m pip install -r requirements-check.txt` 后执行 `python scripts/check.py`（需要 Node.js）。环境隔离、服务管理与验收记录见 [开发与验收入口](docs/agents/development.md)。
+
 ## 核心功能
 
 | 功能模块 | 描述 |

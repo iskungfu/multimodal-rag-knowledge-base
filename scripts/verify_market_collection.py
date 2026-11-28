@@ -17,6 +17,8 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from scripts.acceptance_report import begin_report, finish_report
+ENTRY_REPORT = begin_report({}) if __name__ == "__main__" else None
 
 
 class ObservedBatch:
@@ -153,6 +155,7 @@ def main():
               "pid": os.getpid(), "host": socket.gethostname(), "test_database": test_db,
               "checked_at": datetime.now(timezone.utc).isoformat(),
               "injected_faults": ["interrupt_after_first_batch"] if args.resume else []}
+    begin_report(report, entry_report=ENTRY_REPORT)
     started = time.monotonic()
     mongo = None
     service = None
@@ -246,6 +249,7 @@ def main():
         report["passed"] = report["passed"] and bool(report["cleanup"]) and all(report["cleanup"].values())
         path = ROOT / ".sandcastle/logs" / (run_id + ".json")
         path.parent.mkdir(parents=True, exist_ok=True)
+        finish_report(report)
         path.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         print("report", str(path), flush=True)
     return 0 if report["passed"] else 1

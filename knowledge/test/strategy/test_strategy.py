@@ -306,10 +306,15 @@ def test_pdf_archive_extracts_normal_markdown(tmp_path, monkeypatch):
 
 def test_query_service_status_cannot_bypass_personal_endpoint(setup_service):
     from knowledge.api.query_api import create_app as create_query_app
+    from knowledge.runtime import QueryRuntime
     env = setup_service
     task_id = env.client.post("/strategies/text", json={"text": "test strategy"}).json()["task_id"]
-    with TestClient(create_query_app()) as query_client:
-        assert query_client.get("/status/" + task_id).status_code == 404
+    runtime = QueryRuntime(mongo_factory=lambda: mongomock.MongoClient())
+    try:
+        with TestClient(create_query_app(runtime=runtime)) as query_client:
+            assert query_client.get("/status/" + task_id).status_code == 404
+    finally:
+        runtime.close()
 
 
 def test_metadata_write_failure_does_not_leave_temp_file_or_start_graph(setup_service, monkeypatch):

@@ -1,0 +1,25 @@
+# 离线检查使用的轻量环境；不安装模型、Torch 或 PDF 解析服务。
+pytest==9.2.0
+mongomock==4.3.0
+ruff==0.17.6
+fastapi==0.140.10
+httpx==0.28.1
+pymongo==4.17.0
+openai==2.54.0
+python-dotenv==1.2.1
+requests==2.32.5
+beautifulsoup4==4.14.3
+pymilvus==2.6.6
+minio==7.2.20
+langchain-core==1.6.1
+langchain-openai==1.1.7
+langchain-text-splitters==1.1.0
+langgraph==1.2.11
+APScheduler==3.11.3
+pydantic==2.12.5
+python-multipart==0.0.21
+uvicorn==0.40.0
+baostock==0.9.4
+numpy==2.4.1
+scipy==1.17.0
+psutil==7.2.1

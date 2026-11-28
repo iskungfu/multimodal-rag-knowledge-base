@@ -26,6 +26,8 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from scripts.acceptance_report import begin_report, finish_report
+ENTRY_REPORT = begin_report({}) if __name__ == "__main__" else None
 KINDS = ("personal", "knowledge", "review")
 OWNER = "default_user"
 FOREIGN_OWNER = "investment_accept_foreign"
@@ -923,6 +925,7 @@ def main(argv=None):
     prefix = "investment_accept_" + uuid.uuid4().hex
     report = {"run_id": prefix, "mode": "host" if args.host else "storage", "checks": {}, "cleanup": {},
               "coverage": {}, "passed": False, "full_acceptance": False}
+    begin_report(report, entry_report=ENTRY_REPORT)
     report['scope'] = 'personal-mvp' if args.personal_mvp_only else 'full'
     started = time.monotonic()
     acceptance = None
@@ -971,6 +974,7 @@ def main(argv=None):
         report["seconds"] = round(time.monotonic() - started, 2)
         if not args.host:
             report["pending"] = ["BGE-M3", "三路召回/RRF", "reranker", "selector/LLM", "API/SSE/history", "真实行情"]
+        finish_report(report)
         serialized = json.dumps(report, ensure_ascii=False, indent=2)
         if args.report:
             try:

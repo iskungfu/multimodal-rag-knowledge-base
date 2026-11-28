@@ -187,6 +187,8 @@ class AnswerOutputNode(BaseNode):
         return final_answer
 
 if __name__ == '__main__':
+    from knowledge.utils.mongo_history_util import get_recent_messages
+
     print("=" * 60)
     print("开始测试: 答案输出节点 (AnswerOutputNode)")
     print("=" * 60)

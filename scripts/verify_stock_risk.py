@@ -7,6 +7,8 @@ import sys
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.acceptance_report import begin_report, finish_report
+ENTRY_REPORT = begin_report({}) if __name__ == "__main__" else None
 
 
 def main():
@@ -24,6 +26,7 @@ def main():
 
     # 验收只向指定测试库的 UUID 集合写入；公共向量库仅执行既有只读查询。
     prefix = 'risk_accept_' + uuid.uuid4().hex
+    report = begin_report({'run_id': prefix, 'passed': False, 'cleanup': {}}, entry_report=ENTRY_REPORT)
     runtime = None
     try:
         config = RuntimeConfig.acceptance('stock', prefix, shared_public=bool(args.rag_query))
@@ -69,16 +72,22 @@ def main():
                             assert 'LLM暂无' not in answer and '无法识别' not in answer
                         print(('流式' if streaming else '非流式') + ' API/历史/免责声明一致：PASS')
             print('本次查询验收通过。浏览器验收请另行运行 --serve；未执行的 RAG 不计为通过。')
-        return 0
+        report['passed'] = True
     except Exception:
         print('验收失败；检查行情、模型或存储可用性（异常详情不输出，以免泄露配置）。')
-        return 1
     finally:
         if runtime is not None:
             cleanup = runtime.close()
+            report['cleanup'] = cleanup
             if not all(cleanup.values()):
+                report['passed'] = False
                 print('本次独立测试集合清理失败，请在测试库检查 risk_accept_ 前缀集合。')
-                raise SystemExit(1)
+        finish_report(report)
+        output = Path(__file__).resolve().parents[1] / '.sandcastle/logs' / (prefix + '.json')
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        print('REPORT', str(output))
+    return 0 if report['passed'] else 1
 
 
 if __name__ == '__main__':

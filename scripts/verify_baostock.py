@@ -11,6 +11,8 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from scripts.acceptance_report import begin_report, finish_report
+ENTRY_REPORT = begin_report({}) if __name__ == "__main__" else None
 
 
 class FailedPrimary:
@@ -54,6 +56,7 @@ def main():
     report = {"run_id": run_id, "checks": {}, "samples": [], "calendar": [], "cleanup": {}, "passed": False,
               "checked_at": now.isoformat(), "scope": "four-shenzhen-shanghai-stocks-and-calendar",
               "injected_faults": ["primary_daily", "batch_snapshot"]}
+    begin_report(report, entry_report=ENTRY_REPORT)
     mongo = None
     collection = None
     started = time.monotonic()
@@ -155,6 +158,7 @@ def main():
         directory = ROOT / ".sandcastle/logs"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / (run_id + ".json")
+        finish_report(report)
         path.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         print("report", str(path), flush=True)
     return 0 if report["passed"] else 1

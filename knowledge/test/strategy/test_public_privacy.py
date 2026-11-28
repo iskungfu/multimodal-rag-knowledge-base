@@ -23,6 +23,11 @@ CONTENT = "# 公共书籍\n\n" + PRIVATE + "\n买入价12.5元，复盘后才考
 
 @pytest.fixture
 def public_import(monkeypatch):
+    from knowledge.processor.import_processor import config
+    monkeypatch.setattr(config, "_config", config.ImportConfig(
+        chunks_collection="offline_public_chunks", item_name_collection="offline_public_items"))
+    from knowledge.processor.import_processor.main_graph import import_graph
+    monkeypatch.setattr("knowledge.service.file_process_service.import_app", import_graph())
     from knowledge.processor.import_processor.nodes import bge_embedding_chunks_node as embedding
     from knowledge.processor.import_processor.nodes import item_name_recognition_node as names
     stored, embedded, directories = [], [], []
