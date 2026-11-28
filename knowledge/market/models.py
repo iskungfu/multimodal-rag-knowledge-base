@@ -14,6 +14,25 @@ class MarketUnavailable(Exception):
     """来源无有效收盘数据（对外只返回固定消息，不泄露连接信息）。"""
 
 
+class SnapshotUnavailable(MarketUnavailable):
+    messages = {
+        "source_unavailable": "腾讯快照：来源请求失败或冷却中",
+        "invalid_response": "腾讯快照：批量响应格式无效或证券重复",
+        "missing_snapshot": "腾讯快照：响应未包含该证券",
+        "identity_mismatch": "腾讯快照：代码或市场标识不匹配",
+        "date_mismatch": "腾讯快照：日期不在请求范围内",
+        "not_closed": "腾讯快照：时间早于15:00，不能作为收盘行情",
+        "future_timestamp": "腾讯快照：时间晚于本次查询时间",
+        "invalid_prices": "腾讯快照：开高低收价格缺失或无效",
+        "name_mismatch": "腾讯快照：名称与目录不一致",
+        "invalid_snapshot": "腾讯快照：字段格式或数值无效",
+    }
+
+    def __init__(self, reason="invalid_snapshot"):
+        self.reason = reason if reason in self.messages else "invalid_snapshot"
+        super().__init__(self.messages[self.reason])
+
+
 def security_name(name):
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", name))
 

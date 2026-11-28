@@ -148,6 +148,7 @@ class MarketCollectionService:
         renewed = started - 30
         items, completed, failures = [], set(), {}
         incomplete = set()
+        snapshot_errors = {}
 
         def checkpoint(force=False):
             nonlocal renewed
@@ -178,7 +179,11 @@ class MarketCollectionService:
                     errors[row["code"]] = "已有记录格式或身份不符，需通过单股刷新核对"
                     failures[row["code"]] = errors[row["code"]]
             if final:
-                failures.update({code: errors.get(code, "无可核实的目标日行情") for code in expected if code not in completed})
+                for code in expected:
+                    if code in completed or code in failures:
+                        continue
+                    reason = errors.get(code, "无可核实的目标日行情")
+                    failures[code] = f"{snapshot_errors[code]}；{reason}" if code in snapshot_errors else reason
             self.repository.save_progress(day, token, self.now(), succeeded=len(completed), failed=len(failures),
                                           pending=len(items) - len(completed) - len(failures), incomplete_fields=len(incomplete),
                                           data_warning="部分已保存行情缺少估值或其他可选字段" if incomplete else "",
@@ -212,6 +217,7 @@ class MarketCollectionService:
                 checkpoint()
                 group = pending[offset:offset + 50]
                 quotes, errors = self.batch.fetch_snapshots(group, day, self.now(), checkpoint)
+                snapshot_errors.update(errors)
                 save_group(group, quotes, errors, False)
             for item in pending:
                 if item["code"] in completed or item["code"] in failures:

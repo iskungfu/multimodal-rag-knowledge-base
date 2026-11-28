@@ -10,7 +10,7 @@ from typing import Protocol
 import requests
 from pydantic import ValidationError
 
-from knowledge.market.models import DailyQuote, MarketUnavailable, SHANGHAI, date_window, market_symbol
+from knowledge.market.models import DailyQuote, MarketUnavailable, SnapshotUnavailable, SHANGHAI, date_window, market_symbol
 
 
 def number(value, multiplier=1):
@@ -173,14 +173,23 @@ class TencentAdapter:
         symbol = market_symbol(code)
         try:
             if not text.startswith(f'v_{symbol}="'):
-                raise ValueError("代码不匹配")
+                raise SnapshotUnavailable("identity_mismatch")
             fields = text.split('"')[1].split("~")
             stamp = datetime.strptime(fields[30], "%Y%m%d%H%M%S").replace(tzinfo=SHANGHAI)
-            if fields[2] != code or not start <= stamp.date() <= end or stamp > now or stamp.time() < wall_time(15):
-                raise ValueError("范围内无收盘快照")
+            if fields[2] != code:
+                raise SnapshotUnavailable("identity_mismatch")
+            if not start <= stamp.date() <= end:
+                raise SnapshotUnavailable("date_mismatch")
+            if stamp > now:
+                raise SnapshotUnavailable("future_timestamp")
+            if stamp.time() < wall_time(15):
+                raise SnapshotUnavailable("not_closed")
+            prices = {key: number(fields[index]) for key, index in {"close": 3, "open": 5, "high": 33, "low": 34}.items()}
+            if any(value is None or value <= 0 for value in prices.values()):
+                raise SnapshotUnavailable("invalid_prices")
             return DailyQuote(
-                code=code, name=fields[1], date=stamp.date(), close=number(fields[3]),
-                pre_close=number(fields[4]), open=number(fields[5]), high=number(fields[33]), low=number(fields[34]),
+                code=code, name=fields[1], date=stamp.date(), **prices,
+                pre_close=number(fields[4]),
                 volume=number(fields[6], tencent_volume_multiplier(code)), amount=number(fields[57], 10000),
                 change_pct=number(fields[32]), turnover=number(fields[38]),
                 pe=number(fields[52]), pb=number(fields[46]), market_cap=number(fields[45], 100000000),
@@ -188,4 +197,4 @@ class TencentAdapter:
                 raw={"snapshot": text, "volume_multiplier": tencent_volume_multiplier(code)},
             )
         except PARSE_ERRORS:
-            raise MarketUnavailable("腾讯无有效收盘快照") from None
+            raise SnapshotUnavailable() from None

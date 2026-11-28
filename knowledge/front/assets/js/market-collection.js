@@ -31,7 +31,7 @@ function render(record) {
     }
     if ((record.failures || []).length > 20) {
         const row = document.createElement('li');
-        row.textContent = `另有 ${record.failures.length - 20} 只未列出；再次采集会补齐缺失部分。`;
+        row.textContent = `另有 ${record.failures.length - 20} 只未列出；再次采集会重试缺失部分，能否补齐取决于来源。`;
         missing.append(row);
     }
     if (record.status === 'running' && panel.open) timer = setTimeout(() => load(), 3000);

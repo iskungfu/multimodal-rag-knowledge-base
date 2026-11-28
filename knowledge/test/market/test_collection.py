@@ -173,7 +173,7 @@ def test_batch_validates_each_symbol_date_name_and_units():
                             snapshot("600519", "贵州茅台", "20261126161500")).encode("gbk")
     rows, failures = BatchQuotes(http, fallback).fetch([item(), item("920002", "万达轴承"), item("600519", "贵州茅台")], DAY, NOW)
     assert {row.code for row in rows} == {"000001", "920002"}
-    assert failures == {"600519": "无目标日收盘快照或身份不一致"}
+    assert failures == {"600519": "腾讯快照：日期不在请求范围内；历史备用未取得可核实的目标日行情"}
     assert rows[0].volume == 10000 and rows[0].amount == 120000 and rows[0].market_cap == 1000000000
 
 
