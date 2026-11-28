@@ -55,4 +55,5 @@
 - 本轮补齐：`.sandcastle/results/completion-2026-11-28.md`，记录最终代码回归、真实行情覆盖、RAG、浏览器、审查与清理。
 - 免费源增强：`.sandcastle/results/free-market-sources-2026-11-28.md`，记录参考项目接口、腾讯历史备用、科创板新旧成交量核验及真实样本；不替代全市场或长期运行验收。
 - 独立历史源与交易日历：`.sandcastle/results/baostock-calendar-2026-11-28.md`，记录BaoStock历史涨跌幅、字段口径、隔离进程、API存储及自动休市跳过；北交所继续既有来源。
+- 全市场顺序与恢复：`.sandcastle/results/collection-recovery-2026-11-28.md`，记录全目录快照优先、逐只补采保存、真实中断恢复、来源与缺失字段统计；免费目录中的无效快照仍按缺失处理。
 - 此清单描述当前状态；旧原型报告及各轮报告的失败/未完成记录保留为历史，不应覆盖后续正式验收结论。

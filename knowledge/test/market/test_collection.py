@@ -36,6 +36,8 @@ def service_fixture(items=None, complete=True):
     universe, batch = Mock(), Mock()
     universe.fetch.return_value = {"items": items or [item()], "source": "eastmoney" if complete else "sina", "complete": complete}
     batch.fetch.return_value = ([quote()], {})
+    batch.fetch_snapshots = batch.fetch
+    batch.fetch_history.return_value = ([], {})
     service = MarketCollectionService(repository, MarketQuoteRepository(db.quotes), universe=universe,
                                       batch=batch, now=lambda: NOW)
     return service, db, universe, batch
@@ -276,6 +278,15 @@ def test_more_than_five_missing_snapshots_still_use_historical_fallback():
     assert len(rows) == 6 and not failures and fallback.fetch_daily.call_count == 6
 
 
+def test_duplicate_batch_code_does_not_repeat_successful_history_or_raise():
+    http, fallback = Mock(), Mock()
+    http.get.return_value = b""
+    fallback.fetch_daily.return_value = [quote()]
+    rows, failures = BatchQuotes(http, fallback).fetch([item(), item()], DAY, NOW)
+    assert len(rows) == 1 and rows[0].code == "000001" and not failures
+    fallback.fetch_daily.assert_called_once()
+
+
 def test_collection_validation_does_not_echo_private_input(monkeypatch):
     from knowledge.api.query_api import create_app
     service, _, _, _ = service_fixture()
@@ -297,6 +308,51 @@ def test_invalid_existing_row_is_not_counted_as_saved_or_silently_overwritten():
     assert result["status"] == "failed" and result["succeeded"] == 0 and result["failed"] == 1
     assert "已有记录" in result["failures"][0]["reason"]
     assert db.quotes.find_one({})["close"] == 999
+
+
+def test_slow_history_cannot_prevent_later_snapshot_batches_being_saved():
+    records = [item(f"600{index:03}", f"证券{index}") for index in range(100)]
+    service, db, _, batch = service_fixture(records)
+    first = [quote(record["code"], record["name"]) for record in records[1:50]]
+    second = [quote(record["code"], record["name"]) for record in records[50:]]
+    batch.fetch.side_effect = [(first, {"600000": "缺失"}), (second, {})]
+
+    def stop_during_history(*args):
+        assert db.quotes.count_documents({}) == 99
+        raise CollectionStopped("采集达到时间上限")
+
+    batch.fetch_history.side_effect = stop_during_history
+    result = run(service)
+    assert result["status"] == "failed" and result["succeeded"] == 99 and result["failed"] == 1
+    assert result["pending"] == 0 and db.quotes.count_documents({}) == 99
+    batch.fetch_history.assert_called_once()
+
+
+def test_recovered_history_is_saved_before_next_symbol_times_out():
+    records = [item(), item("600519", "贵州茅台"), item("920002", "万达轴承")]
+    service, db, _, batch = service_fixture(records)
+    batch.fetch.return_value = ([quote()], {})
+    batch.fetch_history.side_effect = [([quote("600519", "贵州茅台")], {}), CollectionStopped("采集达到时间上限")]
+    result = run(service)
+    assert result["status"] == "failed" and result["succeeded"] == 2 and result["failed"] == 1
+    assert set(db.quotes.distinct("code")) == {"000001", "600519"}
+    assert batch.fetch_history.call_args_list[0].args[0] == [records[1]]
+
+
+@pytest.mark.parametrize("malformed", [True, False])
+def test_invalid_stored_quote_does_not_spend_remaining_network_budget(malformed):
+    records = [item(), item("600519", "贵州茅台")]
+    service, db, _, batch = service_fixture(records)
+    stored = {"code": "000001", "date": DAY.isoformat(), "close": 999} if malformed else quote(name="错误名称").model_dump(mode="json")
+    db.quotes.insert_one(stored)
+    batch.fetch.return_value = ([], {})
+    batch.fetch_history.return_value = ([quote("600519", "贵州茅台")], {})
+    result = run(service)
+    assert result["status"] == "partial" and result["succeeded"] == 1 and result["failed"] == 1
+    assert "已有记录" in result["failures"][0]["reason"]
+    assert batch.fetch.call_args.args[0] == [records[1]]
+    assert batch.fetch_history.call_args.args[0] == [records[1]]
+    assert db.quotes.find_one({"code": "000001"}, {"_id": 0}) == {key: value for key, value in stored.items() if key != "_id"}
 
 
 @pytest.mark.parametrize("existing", [False, True])

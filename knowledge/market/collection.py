@@ -157,6 +157,33 @@ class MarketCollectionService:
                 self.repository.renew(day, token, self.now())
                 renewed = self.clock()
 
+        def save_group(group, quotes, errors, final):
+            expected = {item["code"]: item["name"] for item in group}
+            for quote in quotes:
+                if quote.code not in expected or quote.date != day or security_name(quote.name) != security_name(expected[quote.code]):
+                    raise ValueError("批次返回不匹配行情")
+            if len({quote.code for quote in quotes}) != len(quotes):
+                raise ValueError("批次返回重复行情")
+            checkpoint(force=True)
+            stored = self.quotes.save_missing(quotes)
+            for row in stored:
+                try:
+                    saved = DailyQuote.model_validate(row)
+                    if saved.date != day or security_name(saved.name) != security_name(expected[saved.code]):
+                        raise ValueError("已有行情与目录不符")
+                    completed.add(saved.code)
+                    if any(getattr(saved, field) is None for field in ("pe", "pb", "turnover", "change_pct", "amount")):
+                        incomplete.add(saved.code)
+                except (ValueError, KeyError):
+                    errors[row["code"]] = "已有记录格式或身份不符，需通过单股刷新核对"
+                    failures[row["code"]] = errors[row["code"]]
+            if final:
+                failures.update({code: errors.get(code, "无可核实的目标日行情") for code in expected if code not in completed})
+            self.repository.save_progress(day, token, self.now(), succeeded=len(completed), failed=len(failures),
+                                          pending=len(items) - len(completed) - len(failures), incomplete_fields=len(incomplete),
+                                          data_warning="部分已保存行情缺少估值或其他可选字段" if incomplete else "",
+                                          completed_codes=sorted(completed), failures=[{"code": code, "reason": reason} for code, reason in sorted(failures.items())])
+
         try:
             universe = self.universe.fetch(checkpoint)
             items = universe["items"]
@@ -167,46 +194,31 @@ class MarketCollectionService:
                 try:
                     cached = DailyQuote.model_validate(row)
                     if security_name(cached.name) != security_name(names[cached.code]):
-                        continue
+                        raise ValueError("已有行情与目录不符")
                     completed.add(cached.code)
                     if any(getattr(cached, field) is None for field in ("pe", "pb", "turnover", "change_pct", "amount")):
                         incomplete.add(cached.code)
                 except ValueError:
-                    continue
-            pending = [item for item in items if item["code"] not in completed]
-            self.repository.save_progress(day, token, self.now(), total=len(items), succeeded=len(completed), failed=0, pending=len(pending),
+                    failures[row["code"]] = "已有记录格式或身份不符，需通过单股刷新核对"
+            pending = [item for item in items if item["code"] not in completed and item["code"] not in failures]
+            self.repository.save_progress(day, token, self.now(), total=len(items), succeeded=len(completed), failed=len(failures), pending=len(pending),
                                           universe=items, universe_source=universe["source"],
-                                          universe_complete=universe["complete"], completed_codes=sorted(completed), failures=[],
+                                          universe_complete=universe["complete"], completed_codes=sorted(completed),
+                                          failures=[{"code": code, "reason": reason} for code, reason in sorted(failures.items())],
                                           incomplete_fields=len(incomplete), data_warning="部分已保存行情缺少估值或其他可选字段" if incomplete else "",
                                           reported_total=universe.get("reported_total", len(items)), excluded_codes=universe.get("excluded_codes", []),
                                           warning="" if universe["complete"] else "证券目录使用备用源或含未识别代码，覆盖范围未完全核实，不能视为全市场成功")
             for offset in range(0, len(pending), 50):
                 checkpoint()
                 group = pending[offset:offset + 50]
-                quotes, errors = self.batch.fetch(group, day, self.now(), checkpoint)
-                expected = {item["code"]: item["name"] for item in group}
-                for quote in quotes:
-                    if quote.code not in expected or quote.date != day or security_name(quote.name) != security_name(expected[quote.code]):
-                        raise ValueError("批次返回不匹配行情")
-                if len({quote.code for quote in quotes}) != len(quotes):
-                    raise ValueError("批次返回重复行情")
-                checkpoint(force=True)
-                stored = self.quotes.save_missing(quotes)
-                for row in stored:
-                    try:
-                        saved = DailyQuote.model_validate(row)
-                        if saved.date != day or security_name(saved.name) != security_name(expected[saved.code]):
-                            raise ValueError("已有行情与目录不符")
-                        completed.add(saved.code)
-                        if any(getattr(saved, field) is None for field in ("pe", "pb", "turnover", "change_pct", "amount")):
-                            incomplete.add(saved.code)
-                    except (ValueError, KeyError):
-                        errors[row["code"]] = "已有记录格式或身份不符，需通过单股刷新核对"
-                failures.update({code: errors.get(code, "无可核实的目标日行情") for code in expected if code not in completed})
-                self.repository.save_progress(day, token, self.now(), succeeded=len(completed), failed=len(failures),
-                                              pending=len(items) - len(completed) - len(failures), incomplete_fields=len(incomplete),
-                                              data_warning="部分已保存行情缺少估值或其他可选字段" if incomplete else "",
-                                              completed_codes=sorted(completed), failures=[{"code": code, "reason": reason} for code, reason in sorted(failures.items())])
+                quotes, errors = self.batch.fetch_snapshots(group, day, self.now(), checkpoint)
+                save_group(group, quotes, errors, False)
+            for item in pending:
+                if item["code"] in completed or item["code"] in failures:
+                    continue
+                checkpoint()
+                quotes, errors = self.batch.fetch_history([item], day, self.now(), checkpoint)
+                save_group([item], quotes, errors, True)
             checkpoint()
             status = "completed" if len(completed) == len(items) and universe["complete"] else "partial"
             if not completed:

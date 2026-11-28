@@ -15,6 +15,14 @@ class BatchQuotes:
         self.fallbacks = [fallback] if fallback is not None else [EastmoneyAdapter(), BaoStockAdapter(), TencentHistoryAdapter()]
 
     def fetch(self, items, day, now, checkpoint=lambda: None):
+        quotes, failures = self.fetch_snapshots(items, day, now, checkpoint)
+        missing = [item for item in items if item["code"] in failures]
+        if missing:
+            recovered, failures = self.fetch_history(missing, day, now, checkpoint)
+            quotes.extend(recovered)
+        return quotes, failures
+
+    def fetch_snapshots(self, items, day, now, checkpoint=lambda: None):
         if not items or len(items) > 50:
             raise ValueError("批量最多 50 个证券")
         found, failures = {}, {}
@@ -39,6 +47,13 @@ class BatchQuotes:
                 found[code] = quote
             except MarketUnavailable:
                 failures[code] = "无目标日收盘快照或身份不一致"
+        return list(found.values()), failures
+
+    def fetch_history(self, items, day, now, checkpoint=lambda: None):
+        if not items or len(items) > 50:
+            raise ValueError("批量最多 50 个证券")
+        found = {}
+        failures = {item["code"]: "无目标日收盘快照或身份不一致" for item in items}
         for item in items:
             if item["code"] not in failures:
                 continue
