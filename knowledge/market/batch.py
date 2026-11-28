@@ -4,13 +4,14 @@ import re
 
 from knowledge.market.adapters import MarketHTTP, TencentAdapter, EastmoneyAdapter
 from knowledge.market.models import MarketUnavailable, validate_quote_batch, security_name
+from knowledge.market.tencent_history import TencentHistoryAdapter
 
 
 class BatchQuotes:
     def __init__(self, http=None, fallback=None):
         self.http = http or MarketHTTP()
         self.parser = TencentAdapter(self.http)
-        self.fallback = fallback or EastmoneyAdapter()
+        self.fallbacks = [fallback] if fallback is not None else [EastmoneyAdapter(), TencentHistoryAdapter()]
 
     def fetch(self, items, day, now, checkpoint=lambda: None):
         if not items or len(items) > 50:
@@ -40,13 +41,15 @@ class BatchQuotes:
         for item in items:
             if item["code"] not in failures:
                 continue
-            checkpoint()
-            try:
-                rows = validate_quote_batch(self.fallback.fetch_daily(item["code"], day, day, now), item["code"], day, day)
-                if len(rows) != 1 or security_name(rows[0].name) != security_name(item["name"]):
-                    raise MarketUnavailable("备用日线身份不符")
-                found[item["code"]] = rows[0]
-                failures.pop(item["code"])
-            except MarketUnavailable:
-                pass
+            for adapter in self.fallbacks:
+                checkpoint()
+                try:
+                    rows = validate_quote_batch(adapter.fetch_daily(item["code"], day, day, now), item["code"], day, day)
+                    if len(rows) != 1 or security_name(rows[0].name) != security_name(item["name"]):
+                        raise MarketUnavailable("备用日线身份不符")
+                    found[item["code"]] = rows[0]
+                    failures.pop(item["code"])
+                    break
+                except MarketUnavailable:
+                    pass
         return list(found.values()), failures

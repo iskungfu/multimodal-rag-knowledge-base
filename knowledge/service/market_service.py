@@ -6,12 +6,13 @@ from datetime import datetime, timezone
 
 from knowledge.market.adapters import EastmoneyAdapter, TencentAdapter
 from knowledge.market.models import MarketUnavailable, date_window, market_symbol, validate_quote_batch
+from knowledge.market.tencent_history import TencentHistoryAdapter
 
 
 class MarketService:
     def __init__(self, repository, adapters=None, *, now=None, clock=time.monotonic):
         self.repository = repository
-        self.adapters = adapters if adapters is not None else [EastmoneyAdapter(), TencentAdapter()]
+        self.adapters = adapters if adapters is not None else [EastmoneyAdapter(), TencentHistoryAdapter(), TencentAdapter()]
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.clock = clock
         self.lock = threading.Lock()
@@ -36,10 +37,14 @@ class MarketService:
                     continue
                 self.repository.save(quotes)
                 warnings = []
-                if adapter.name != "eastmoney":
+                if adapter.name == "tencent":
                     warnings.append("主源不可用，备用源仅返回最新已收盘日，历史区间可能不完整")
+                elif adapter.name != "eastmoney":
+                    warnings.append("主源不可用，已切换备用历史日线，来源覆盖可能不完整")
                 if any(q.pe is None for q in quotes):
                     warnings.append("部分日期没有可核实的动态 PE，缺失估值保留为空")
+                if any(q.change_pct is None for q in quotes):
+                    warnings.append("部分日期缺少来源涨跌幅，不使用未复权相邻收盘价猜测，风险评估可能受限")
                 if max(q.date for q in quotes) < end:
                     warnings.append("来源最新日期早于请求结束日期，请确认休市、停牌或来源延迟")
                 result = {"code": code, "start": start, "end": end, "source": adapter.name,

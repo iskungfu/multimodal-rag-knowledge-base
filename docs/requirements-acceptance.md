@@ -53,4 +53,5 @@
 - 既有核心六模块：`.sandcastle/results/issue-2.md` 至 `issue-7.md`，以各报告实际范围为准。
 - 上轮个人使用版：`.sandcastle/results/personal-mvp-2026-11-28.md`。
 - 本轮补齐：`.sandcastle/results/completion-2026-11-28.md`，记录最终代码回归、真实行情覆盖、RAG、浏览器、审查与清理。
+- 免费源增强：`.sandcastle/results/free-market-sources-2026-11-28.md`，记录参考项目接口、腾讯历史备用、科创板新旧成交量核验及真实样本；不替代全市场或长期运行验收。
 - 此清单描述当前状态；旧原型报告及各轮报告的失败/未完成记录保留为历史，不应覆盖后续正式验收结论。

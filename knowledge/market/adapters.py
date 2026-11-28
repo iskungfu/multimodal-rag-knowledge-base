@@ -22,6 +22,10 @@ def number(value, multiplier=1):
     return float(result)
 
 
+def tencent_volume_multiplier(code):
+    return 1 if code.startswith(("688", "689")) else 100
+
+
 class QuoteAdapter(Protocol):
     name: str
 
@@ -177,11 +181,11 @@ class TencentAdapter:
             return DailyQuote(
                 code=code, name=fields[1], date=stamp.date(), close=number(fields[3]),
                 pre_close=number(fields[4]), open=number(fields[5]), high=number(fields[33]), low=number(fields[34]),
-                volume=number(fields[6], 100), amount=number(fields[57], 10000),
+                volume=number(fields[6], tencent_volume_multiplier(code)), amount=number(fields[57], 10000),
                 change_pct=number(fields[32]), turnover=number(fields[38]),
                 pe=number(fields[52]), pb=number(fields[46]), market_cap=number(fields[45], 100000000),
                 source=self.name, valuation_source=self.name, source_time=stamp, updated_at=now,
-                raw={"snapshot": text},
+                raw={"snapshot": text, "volume_multiplier": tencent_volume_multiplier(code)},
             )
         except PARSE_ERRORS:
             raise MarketUnavailable("腾讯无有效收盘快照") from None
